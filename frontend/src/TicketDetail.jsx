@@ -75,7 +75,7 @@ function TicketDetail({ setFlash }) {
                     <button onClick={() => handleStatusChange('open')}>Open</button>
                 </div>
             ) : (
-                <p>Please log in to change the status.</p>
+                <p>Only the owner or an admin can change the status.</p>
             )}
             <p>Created at: {formatAlter(ticket.created_at)}</p>
             {!ticket.solution && currentUsername === 'admin' ? (
