@@ -1,3 +1,4 @@
+import os
 import sqlite3
 from flask import Flask, jsonify, request, session
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -5,6 +6,11 @@ from flask_cors import CORS
 
 app = Flask(__name__) 
 app.secret_key = 'project-portfolio'
+
+if os.environ.get('FLASK_ENV') == 'production':
+    app.config['SESSION_COOKIE_SAMESITE'] = 'None'
+    app.config['SESSION_COOKIE_SECURE'] = True
+    
 CORS(app, supports_credentials=True, origins=["https://ticket-system-two-ivory.vercel.app", "http://localhost:5173"])
 
 connection = sqlite3.connect('tickets.db')
