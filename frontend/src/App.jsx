@@ -62,6 +62,7 @@ function App() {
         } />
         <Route path="/tickets/:id" element={<TicketDetail setFlash={setFlash} />} />
       </Routes>
+      <footer>Contact: muhammet.sahin@gmx.net</footer>
     </BrowserRouter>
   )
 }
