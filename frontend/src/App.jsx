@@ -14,7 +14,7 @@ function App() {
   const [flash, setFlash] = useState(null)
 
   async function handleLogout() {
-    await fetch('http://localhost:5000/logout', {
+    await fetch(`${import.meta.env.VITE_API_URL}/logout`, {
       method: 'POST',
       credentials: 'include'
     })
