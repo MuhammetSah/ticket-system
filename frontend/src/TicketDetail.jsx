@@ -10,11 +10,11 @@ function TicketDetail({ setFlash }) {
 
     useEffect(() => {
         async function loadTicket() {
-            const response = await fetch(`http://localhost:5000/tickets/${id}`)
+            const response = await fetch(`${import.meta.env.VITE_API_URL}/tickets/${id}`)
             const data = await response.json()
             setTicket(data)
 
-            const user_response = await fetch('http://localhost:5000/me', { credentials: 'include' })
+            const user_response = await fetch(`${import.meta.env.VITE_API_URL}/me`, { credentials: 'include' })
             const user_data = await user_response.json()
             setCurrentuser(user_data.user_id)
             setCurrentUsername(user_data.username)
@@ -23,7 +23,7 @@ function TicketDetail({ setFlash }) {
     }, [id])
 
     async function handleStatusChange(newStatus) {
-        const response = await fetch(`http://localhost:5000/tickets/${id}`, {
+        const response = await fetch(`${import.meta.env.VITE_API_URL}/tickets/${id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: newStatus }),
@@ -41,7 +41,7 @@ function TicketDetail({ setFlash }) {
     }
 
     async function handleSolutionChange(newSolution) {
-        const response = await fetch(`http://localhost:5000/tickets/${id}`, {
+        const response = await fetch(`${import.meta.env.VITE_API_URL}/tickets/${id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ solution: newSolution }),

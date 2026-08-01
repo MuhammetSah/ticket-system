@@ -6,7 +6,7 @@ function Tickets({ refreshKey }) {
 
     useEffect(() => {
         async function loadTickets() {
-            const response = await fetch('http://localhost:5000/tickets')
+            const response = await fetch(`${import.meta.env.VITE_API_URL}/tickets`, { credentials: 'include' })
             const data = await response.json()
             setTickets(data)
         }

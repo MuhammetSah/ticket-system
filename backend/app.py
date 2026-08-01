@@ -5,7 +5,7 @@ from flask_cors import CORS
 
 app = Flask(__name__) 
 app.secret_key = 'project-portfolio'
-CORS(app, supports_credentials=True)
+CORS(app, supports_credentials=True, origins=["https://ticket-system-two-ivory.vercel.app", "http://localhost:5173"])
 
 connection = sqlite3.connect('tickets.db')
 cursor = connection.cursor()

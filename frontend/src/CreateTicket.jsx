@@ -7,7 +7,7 @@ function CreateTicket({ onTicketCreated, setFlash }) {
   const [contactEmail, setContactEmail] = useState('')
 
   async function handleSubmit() {
-    const response = await fetch('http://localhost:5000/tickets', {
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/tickets`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
