@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react'
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 
 function TicketDetail({ setFlash }) {
     const { id } = useParams()
+    const navigate = useNavigate()
     const [ticket, setTicket] = useState(null)
     const [currentuser, setCurrentuser] = useState(null)
     const [currentsolution, setCurrentsolution] = useState('')
     const [currentUsername, setCurrentUsername] = useState(null)
+    const [currentRole, setCurrentRole] = useState(null)
 
     useEffect(() => {
         async function loadTicket() {
@@ -18,6 +20,7 @@ function TicketDetail({ setFlash }) {
             const user_data = await user_response.json()
             setCurrentuser(user_data.user_id)
             setCurrentUsername(user_data.username)
+            setCurrentRole(user_data.role)
         }
         loadTicket()
     }, [id])
@@ -58,6 +61,26 @@ function TicketDetail({ setFlash }) {
         }
     }
 
+    async function handleDelete() {
+        if (!window.confirm('Are you sure you want to delete this ticket? This action cannot be undone.')) {
+            return
+        }
+
+        const response = await fetch(`${import.meta.env.VITE_API_URL}/tickets/${id}`, {
+            method: 'DELETE',
+            credentials: 'include'
+        })
+
+        const data = await response.json()
+
+        if (response.ok) {
+            setFlash({ type: 'success', text: 'Ticket deleted.' })
+            navigate('/')
+        } else {
+            setFlash({ type: 'error', text: data.message || 'Could not delete ticket.' })
+        }
+    }
+
     if (!ticket) return <p>Loading...</p>
 
     return (
@@ -69,16 +92,27 @@ function TicketDetail({ setFlash }) {
             <span className={`status-badge ${ticket.status === 'solved' ? 'status-solved' : 'status-open'}`}>
                 {ticket.status}
             </span>
-            {currentuser === ticket.user_id || currentUsername === 'admin' ? (
+            {currentuser === ticket.user_id || currentRole === 'admin' ? (
                 <div className="button-group">
-                    <button onClick={() => handleStatusChange('solved')}>Solved</button>
-                    <button onClick={() => handleStatusChange('open')}>Open</button>
+                    <button onClick={() => handleStatusChange('solved')}  style={{ backgroundColor: '#06aa1c', borderColor: '#06aa1c' }}>Solved</button>
+                    <button onClick={() => handleStatusChange('open')} style={{ backgroundColor: '#fddf65', borderColor: '#fddf65' }}>
+                        Open
+                    </button>
                 </div>
             ) : (
                 <p>Only the owner or an admin can change the status.</p>
             )}
+            {currentuser === ticket.user_id || currentRole === 'admin' ? (
+                <div className="button-delete">
+                    <button onClick={() => handleDelete()} style={{ backgroundColor: '#991b1b', borderColor: '#991b1b' }}>
+                        Delete
+                    </button>
+                </div>
+            ) : (
+                <p>Only the owner or an admin can delete the ticket.</p>
+            )}
             <p>Created at: {formatAlter(ticket.created_at)}</p>
-            {!ticket.solution && currentUsername === 'admin' ? (
+            {!ticket.solution && currentRole === 'admin' ? (
                 <>
                     <textarea placeholder='Your solution here' value={currentsolution} onChange={(e) => setCurrentsolution(e.target.value)} />
                     <button onClick={() => handleSolutionChange(currentsolution)}>Submit Solution</button>
