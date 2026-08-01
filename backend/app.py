@@ -10,7 +10,7 @@ app.secret_key = 'project-portfolio'
 if os.environ.get('FLASK_ENV') == 'production':
     app.config['SESSION_COOKIE_SAMESITE'] = 'None'
     app.config['SESSION_COOKIE_SECURE'] = True
-    
+
 CORS(app, supports_credentials=True, origins=["https://ticket-system-two-ivory.vercel.app", "http://localhost:5173"])
 
 connection = sqlite3.connect('tickets.db')
@@ -22,6 +22,7 @@ cursor.execute('''
     CREATE TABLE IF NOT EXISTS users(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT NOT NULL,
+        role TEXT DEFAULT 'user',
         hash TEXT NOT NULL
     )
 ''')
@@ -162,13 +163,17 @@ def update_ticket(ticket_id):
     cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))
     current_user = cursor.fetchone()
 
+    if not current_user:
+            connection.close()
+            return jsonify({'message': 'User not found'}), 404
+
     data = request.get_json()
 
-    if 'status' in data and ticket['user_id'] != user_id and current_user['username'] != 'admin':
+    if 'status' in data and ticket['user_id'] != user_id and current_user['role'] != 'admin':
         connection.close()
         return jsonify({'message': 'Not authorized to change status'}), 403
 
-    if 'solution' in data and current_user['username'] != 'admin':
+    if 'solution' in data and current_user['role'] != 'admin':
         connection.close()
         return jsonify({'message': 'Only admin can set a solution'}), 403
 
@@ -193,7 +198,42 @@ def me():
     user = cursor.fetchone()
     connection.close()
 
-    return jsonify({'user_id': user['id'], 'username': user['username']}), 200
+    return jsonify({'user_id': user['id'], 'username': user['username'], 'role': user['role']}), 200
+
+# Delete a ticket
+@app.route('/tickets/<int:ticket_id>', methods=['DELETE'])
+def delete_ticket(ticket_id):
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'message': 'User not logged in'}), 401
+
+    connection = sqlite3.connect('tickets.db')
+    connection.row_factory = sqlite3.Row
+    cursor = connection.cursor()
+    cursor.execute('SELECT * FROM tickets WHERE id = ?', (ticket_id,))
+    ticket = cursor.fetchone()
+
+    if not ticket: 
+        connection.close()
+        return jsonify({'message': 'Ticket not found'}), 404
+
+
+    cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))
+    current_user = cursor.fetchone()
+
+    if not current_user:
+        connection.close()
+        return jsonify({'message': 'User not found'}), 404
+
+    if ticket['user_id'] != user_id and current_user['role'] != 'admin':
+        connection.close()
+        return jsonify({'message': 'Not authorized to delete this ticket'}), 403
+
+    cursor.execute('DELETE FROM tickets WHERE id = ?', (ticket_id,))
+    connection.commit()
+    connection.close()
+    return jsonify({'message': 'Ticket deleted successfully'}), 200
+
 
 if __name__ == '__main__':
     app.run(debug=True)
