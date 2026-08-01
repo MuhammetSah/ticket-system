@@ -62,7 +62,9 @@ function App() {
         } />
         <Route path="/tickets/:id" element={<TicketDetail setFlash={setFlash} />} />
       </Routes>
-      <footer>Contact: muhammet.sahin@gmx.net</footer>
+      <footer className="footer">
+        <p>&copy; 2026 Muhammet Sahin. All rights reserved. Contact: muhammet.sahin@gmx.net</p>
+      </footer>
     </BrowserRouter>
   )
 }
