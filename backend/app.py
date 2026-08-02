@@ -91,7 +91,7 @@ def create_ticket():
     title = data.get('title') # Get the title of the ticket from the JSON data
     description = data.get('description') # Get the description of the ticket from the JSON data
     connection = get_db_connection()
-    cursor = connection.cursor()
+    cursor = connection.cursor(cursor_factory=RealDictCursor)
     cursor.execute('INSERT INTO tickets (user_id, contact_name, contact_email, title, description, status) VALUES (%s, %s, %s, %s, %s, %s)', (user_id, contact_name, contact_email, title, description, 'open'))
     connection.commit()
     connection.close()
@@ -104,7 +104,7 @@ def register():
     username = data.get('username')
     password = data.get('password')
     connection = get_db_connection()
-    cursor = connection.cursor()
+    cursor = connection.cursor(cursor_factory=RealDictCursor)
     cursor.execute('SELECT * FROM users WHERE username = %s', (username,))
     existing_user = cursor.fetchone()
     if existing_user:
