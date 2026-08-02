@@ -1,5 +1,7 @@
 import os
 import sqlite3
+import psycopg2
+from psycopg2.extras import RealDictCursor 
 from flask import Flask, jsonify, request, session
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_cors import CORS
@@ -13,14 +15,20 @@ if os.environ.get('FLASK_ENV') == 'production':
 
 CORS(app, supports_credentials=True, origins=["https://ticket-system-two-ivory.vercel.app", "http://localhost:5173"])
 
-connection = sqlite3.connect('tickets.db')
+def get_db_connection():
+    if os.environ.get('DATABASE_URL'):
+        return psycopg2.connect(os.environ['DATABASE_URL'], sslmode='require')
+    else:
+        return sqlite3.connect('tickets.db')
+
+connection = get_db_connection()
 cursor = connection.cursor()
 
 # CREATE TABLE for SQL 
 # TABLE for users
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS users(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         username TEXT NOT NULL,
         role TEXT DEFAULT 'user',
         hash TEXT NOT NULL
@@ -30,7 +38,7 @@ cursor.execute('''
 # TABLE for tickets
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS tickets(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         user_id INTEGER NOT NULL,
         contact_name TEXT NOT NULL,
         contact_email TEXT NOT NULL,
@@ -38,7 +46,7 @@ cursor.execute('''
         description TEXT NOT NULL,
         solution TEXT,
         status TEXT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(user_id) REFERENCES users(id)
     )
 ''')
@@ -49,21 +57,19 @@ connection.close()
 # Get all tickets
 @app.route('/tickets', methods=['GET'])
 def get_tickets():
-    connection = sqlite3.connect('tickets.db') # Connect to the database
-    connection.row_factory = sqlite3.Row # Set the row factory to sqlite3.Row to access columns by name
-    cursor = connection.cursor()  # Create a cursor object to execute SQL queries
-    cursor.execute('SELECT * FROM tickets') # Query to select all tickets
-    tickets = cursor.fetchall() # Fetch all tickets from the database
-    connection.close() # Close the database connection
-    return jsonify([dict(ticket) for ticket in tickets]) # Convert the tickets to a list of dictionaries and return as JSON
+    connection = get_db_connection()
+    cursor = connection.cursor(cursor_factory=RealDictCursor)
+    cursor.execute('SELECT * FROM tickets')
+    tickets = cursor.fetchall()
+    connection.close()
+    return jsonify(tickets)
 
 # Get a specific ticket by ID
 @app.route('/tickets/<int:ticket_id>', methods=['GET'])
 def get_ticket(ticket_id):
-    connection = sqlite3.connect('tickets.db')
-    connection.row_factory = sqlite3.Row
-    cursor = connection.cursor()
-    cursor.execute('SELECT * FROM tickets WHERE id = ?', (ticket_id,)) # Query to select the ticket with the given ID
+    connection = get_db_connection()
+    cursor = connection.cursor(cursor_factory=RealDictCursor)
+    cursor.execute('SELECT * FROM tickets WHERE id = %s', (ticket_id,)) # Query to select the ticket with the given ID
     ticket = cursor.fetchone() # Fetch the ticket from the database
     connection.close()
     if ticket:
@@ -84,9 +90,9 @@ def create_ticket():
     contact_email = data.get('contact_email') # Get the contact email from the JSON data
     title = data.get('title') # Get the title of the ticket from the JSON data
     description = data.get('description') # Get the description of the ticket from the JSON data
-    connection = sqlite3.connect('tickets.db') 
-    cursor = connection.cursor() 
-    cursor.execute('INSERT INTO tickets (user_id, contact_name, contact_email, title, description, status) VALUES (?, ?, ?, ?, ?, ?)', (user_id, contact_name, contact_email, title, description, 'open'))
+    connection = get_db_connection()
+    cursor = connection.cursor()
+    cursor.execute('INSERT INTO tickets (user_id, contact_name, contact_email, title, description, status) VALUES (%s, %s, %s, %s, %s, %s)', (user_id, contact_name, contact_email, title, description, 'open'))
     connection.commit()
     connection.close()
     return jsonify({'message': 'Ticket created successfully'}), 201 # Return a 201 Created response with a success message
@@ -97,19 +103,20 @@ def register():
     data = request.get_json()
     username = data.get('username')
     password = data.get('password')
-    connection = sqlite3.connect('tickets.db')
+    connection = get_db_connection()
     cursor = connection.cursor()
-    cursor.execute('SELECT * FROM users WHERE username = ?', (username,))
+    cursor.execute('SELECT * FROM users WHERE username = %s', (username,))
     existing_user = cursor.fetchone()
     if existing_user:
         connection.close()
         return jsonify({'message': 'Username already exists'}), 400
 
     hashed_password = generate_password_hash(password)
-    cursor.execute('INSERT INTO users (username, hash) VALUES (?, ?)', (username, hashed_password))
+    cursor.execute('INSERT INTO users (username, hash) VALUES (%s, %s) RETURNING id', (username, hashed_password))
+    user_id = cursor.fetchone()['id']
     connection.commit()
 
-    session['user_id'] = cursor.lastrowid
+    session['user_id'] = user_id
 
     connection.close()
     return jsonify({'message': 'User created successfully'}), 201
@@ -120,10 +127,9 @@ def login():
     data = request.get_json()
     username = data.get('username')
     password = data.get('password')
-    connection = sqlite3.connect('tickets.db')
-    connection.row_factory = sqlite3.Row # Set the row factory to sqlite3.Row to access columns by name
-    cursor = connection.cursor()
-    cursor.execute('SELECT * FROM users WHERE username = ?', (username,)) # Query to select the user with the given username
+    connection = get_db_connection()
+    cursor = connection.cursor(cursor_factory=RealDictCursor)
+    cursor.execute('SELECT * FROM users WHERE username = %s', (username,)) # Query to select the user with the given username
     existing_user = cursor.fetchone() 
     if not existing_user: # If the user does not exist, return a 401 Unauthorized response with an error message
         connection.close()
@@ -150,17 +156,16 @@ def update_ticket(ticket_id):
     if not user_id:
         return jsonify({'message': 'User not logged in'}), 401
 
-    connection = sqlite3.connect('tickets.db')
-    connection.row_factory = sqlite3.Row
-    cursor = connection.cursor()
-    cursor.execute('SELECT * FROM tickets WHERE id = ?', (ticket_id,))
+    connection = get_db_connection()
+    cursor = connection.cursor(cursor_factory=RealDictCursor)
+    cursor.execute('SELECT * FROM tickets WHERE id = %s', (ticket_id,))
     ticket = cursor.fetchone()
 
     if not ticket:
         connection.close()
         return jsonify({'message': 'Ticket not found'}), 404
 
-    cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))
+    cursor.execute('SELECT * FROM users WHERE id = %s', (user_id,))
     current_user = cursor.fetchone()
 
     if not current_user:
@@ -180,7 +185,7 @@ def update_ticket(ticket_id):
     status = data.get('status', ticket['status'])
     solution = data.get('solution', ticket['solution'])
 
-    cursor.execute('UPDATE tickets SET status = ?, solution = ? WHERE id = ?', (status, solution, ticket_id))
+    cursor.execute('UPDATE tickets SET status = %s, solution = %s WHERE id = %s', (status, solution, ticket_id))
     connection.commit()
     connection.close()
     return jsonify({'message': 'Ticket updated successfully'}), 200
@@ -191,10 +196,9 @@ def me():
     if not user_id:
         return jsonify({'message': 'Not logged in'}), 401
 
-    connection = sqlite3.connect('tickets.db')
-    connection.row_factory = sqlite3.Row
-    cursor = connection.cursor()
-    cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))
+    connection = get_db_connection()
+    cursor = connection.cursor(cursor_factory=RealDictCursor)
+    cursor.execute('SELECT * FROM users WHERE id = %s', (user_id,))
     user = cursor.fetchone()
     connection.close()
 
@@ -207,10 +211,9 @@ def delete_ticket(ticket_id):
     if not user_id:
         return jsonify({'message': 'User not logged in'}), 401
 
-    connection = sqlite3.connect('tickets.db')
-    connection.row_factory = sqlite3.Row
-    cursor = connection.cursor()
-    cursor.execute('SELECT * FROM tickets WHERE id = ?', (ticket_id,))
+    connection = get_db_connection()
+    cursor = connection.cursor(cursor_factory=RealDictCursor)
+    cursor.execute('SELECT * FROM tickets WHERE id = %s', (ticket_id,))
     ticket = cursor.fetchone()
 
     if not ticket: 
@@ -218,7 +221,7 @@ def delete_ticket(ticket_id):
         return jsonify({'message': 'Ticket not found'}), 404
 
 
-    cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))
+    cursor.execute('SELECT * FROM users WHERE id = %s', (user_id,))
     current_user = cursor.fetchone()
 
     if not current_user:
@@ -229,11 +232,26 @@ def delete_ticket(ticket_id):
         connection.close()
         return jsonify({'message': 'Not authorized to delete this ticket'}), 403
 
-    cursor.execute('DELETE FROM tickets WHERE id = ?', (ticket_id,))
+    cursor.execute('DELETE FROM tickets WHERE id = %s', (ticket_id,))
     connection.commit()
     connection.close()
     return jsonify({'message': 'Ticket deleted successfully'}), 200
 
+# Set admin role for a user
+@app.route('/set_admin/<int:user_id>', methods=['POST'])
+def set_admin(user_id):
+    data = request.get_json()
+    secret = data.get('secret')
+
+    if secret != os.environ.get('ADMIN_SETUP_SECRET'):
+        return jsonify({'message': 'Not authorized'}), 403
+
+    connection = get_db_connection()
+    cursor = connection.cursor()
+    cursor.execute('UPDATE users SET role = %s WHERE id = %s', ('admin', user_id))
+    connection.commit()
+    connection.close()
+    return jsonify({'message': 'User role updated to admin successfully'}), 200
 
 if __name__ == '__main__':
     app.run(debug=True)
