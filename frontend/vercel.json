@@ -3,6 +3,10 @@
     {
       "source": "/api/:path*",
       "destination": "https://ticket-system-bc2r.onrender.com/:path*"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
     }
   ]
 }
