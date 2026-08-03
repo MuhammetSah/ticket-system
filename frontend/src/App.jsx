@@ -24,47 +24,52 @@ function App() {
 
   return (
     <BrowserRouter>
-      <nav className="navbar">
-        <Link to="/">Index</Link>
-        <div className="navbar-right">
-          {isLoggedIn ? (
-            <button onClick={handleLogout}>Logout</button>
-          ) : (
-            <>
-              <Link to="/register">Register</Link>
-              <Link to="/login">Login</Link>
-            </>
-          )}
-        </div>
-      </nav>
+      <div className="app">
+        <div className="glow-bg" aria-hidden="true" />
+        <nav className="navbar">
+          <Link to="/" className="navbar-brand">Index</Link>
+          <div className="navbar-right">
+            {isLoggedIn ? (
+              <button onClick={handleLogout}>Logout</button>
+            ) : (
+              <>
+                <Link to="/register">Register</Link>
+                <Link to="/login">Login</Link>
+              </>
+            )}
+          </div>
+        </nav>
 
-      <Flash flash={flash} onClose={() => setFlash(null)} />
+        <Flash flash={flash} onClose={() => setFlash(null)} />
 
-      <Routes>
-        <Route path="/" element={
-          isLoggedIn ? (
-            <>
-              <CreateTicket
-                onTicketCreated={() => setRefreshKey(refreshKey + 1)}
-                setFlash={setFlash}
-              />
-              <Tickets refreshKey={refreshKey} />
-            </>
-          ) : (
-            <p>Please log in or register.</p>
-          )
-        } />
-        <Route path="/login" element={
-          <Login onLoginSuccess={() => setIsLoggedIn(true)} setFlash={setFlash} />
-        } />
-        <Route path="/register" element={
-          <Register onLoginSuccess={() => setIsLoggedIn(true)} setFlash={setFlash} />
-        } />
-        <Route path="/tickets/:id" element={<TicketDetail setFlash={setFlash} />} />
-      </Routes>
-      <footer className="footer">
-        <p>2026 Muhammet Sahin. All rights reserved. Contact: muhammet.sahin@gmx.net</p>
-      </footer>
+        <main className="page">
+          <Routes>
+            <Route path="/" element={
+              isLoggedIn ? (
+                <>
+                  <CreateTicket
+                    onTicketCreated={() => setRefreshKey(refreshKey + 1)}
+                    setFlash={setFlash}
+                  />
+                  <Tickets refreshKey={refreshKey} />
+                </>
+              ) : (
+                <p>Please log in or register.</p>
+              )
+            } />
+            <Route path="/login" element={
+              <Login onLoginSuccess={() => setIsLoggedIn(true)} setFlash={setFlash} />
+            } />
+            <Route path="/register" element={
+              <Register onLoginSuccess={() => setIsLoggedIn(true)} setFlash={setFlash} />
+            } />
+            <Route path="/tickets/:id" element={<TicketDetail setFlash={setFlash} />} />
+          </Routes>
+        </main>
+        <footer className="footer">
+          <p>2026 Muhammet Sahin. All rights reserved. Contact: muhammet.sahin@gmx.net</p>
+        </footer>
+      </div>
     </BrowserRouter>
   )
 }

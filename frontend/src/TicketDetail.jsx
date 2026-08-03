@@ -94,8 +94,8 @@ function TicketDetail({ setFlash }) {
             </span>
             {currentuser === ticket.user_id || currentRole === 'admin' ? (
                 <div className="button-group">
-                    <button onClick={() => handleStatusChange('solved')}  style={{ backgroundColor: '#06aa1c', borderColor: '#06aa1c' }}>Solved</button>
-                    <button onClick={() => handleStatusChange('open')} style={{ backgroundColor: '#fddf65', borderColor: '#fddf65' }}>
+                    <button onClick={() => handleStatusChange('solved')} className="btn-success">Solved</button>
+                    <button onClick={() => handleStatusChange('open')} className="btn-warning">
                         Open
                     </button>
                 </div>
@@ -104,7 +104,7 @@ function TicketDetail({ setFlash }) {
             )}
             {currentuser === ticket.user_id || currentRole === 'admin' ? (
                 <div className="button-delete">
-                    <button onClick={() => handleDelete()} style={{ backgroundColor: '#991b1b', borderColor: '#991b1b' }}>
+                    <button onClick={() => handleDelete()} className="btn-danger">
                         Delete
                     </button>
                 </div>
