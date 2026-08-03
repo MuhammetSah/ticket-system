@@ -237,21 +237,5 @@ def delete_ticket(ticket_id):
     connection.close()
     return jsonify({'message': 'Ticket deleted successfully'}), 200
 
-# Set admin role for a user
-@app.route('/set_admin/<int:user_id>', methods=['POST'])
-def set_admin(user_id):
-    data = request.get_json()
-    secret = data.get('secret')
-
-    if secret != os.environ.get('ADMIN_SETUP_SECRET'):
-        return jsonify({'message': 'Not authorized'}), 403
-
-    connection = get_db_connection()
-    cursor = connection.cursor()
-    cursor.execute('UPDATE users SET role = %s WHERE id = %s', ('admin', user_id))
-    connection.commit()
-    connection.close()
-    return jsonify({'message': 'User role updated to admin successfully'}), 200
-
 if __name__ == '__main__':
     app.run(debug=True)
