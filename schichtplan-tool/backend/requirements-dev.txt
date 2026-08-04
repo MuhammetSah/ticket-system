@@ -1,0 +1,4 @@
+# Only needed to run benchmark.py, which compares the scheduler against an
+# exact CP-SAT solve. The app itself does not need this.
+-r requirements.txt
+ortools
