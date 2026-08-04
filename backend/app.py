@@ -1,13 +1,18 @@
 import os
 import sqlite3
-import psycopg2
-from psycopg2.extras import RealDictCursor 
 from flask import Flask, jsonify, request, session
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_cors import CORS
 
-app = Flask(__name__) 
-app.secret_key = 'project-portfolio'
+try:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+except ImportError:  # only needed for the deployed Postgres database
+    psycopg2 = None
+    RealDictCursor = None
+
+app = Flask(__name__)
+app.secret_key = os.environ.get('SECRET_KEY', 'project-portfolio')
 
 if os.environ.get('FLASK_ENV') == 'production':
     app.config['SESSION_COOKIE_SAMESITE'] = 'None'
@@ -15,20 +20,68 @@ if os.environ.get('FLASK_ENV') == 'production':
 
 CORS(app, supports_credentials=True, origins=["https://ticket-system-two-ivory.vercel.app", "http://localhost:5173"])
 
+def use_postgres():
+    return bool(os.environ.get('DATABASE_URL'))
+
+
+class _SqliteCursor:
+    """Lets SQLite accept the calling conventions the routes use for Postgres.
+
+    Every query below is written for psycopg2: %s placeholders and rows that can
+    be read like dictionaries. Rather than keep two copies of each query, this
+    translates on the way through, so running locally against SQLite behaves the
+    same as running against the deployed Postgres database.
+    """
+
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def execute(self, query, params=()):
+        return self._cursor.execute(query.replace('%s', '?'), params)
+
+    def fetchone(self):
+        row = self._cursor.fetchone()
+        return dict(row) if row is not None else None
+
+    def fetchall(self):
+        return [dict(row) for row in self._cursor.fetchall()]
+
+    def __getattr__(self, name):
+        return getattr(self._cursor, name)
+
+
+class _SqliteConnection:
+    def __init__(self, connection):
+        self._connection = connection
+
+    def cursor(self, *_args, **_kwargs):
+        # cursor_factory is accepted and ignored: rows already come back as dicts.
+        return _SqliteCursor(self._connection.cursor())
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
+
+
 def get_db_connection():
-    if os.environ.get('DATABASE_URL'):
+    if use_postgres():
         return psycopg2.connect(os.environ['DATABASE_URL'], sslmode='require')
-    else:
-        return sqlite3.connect('tickets.db')
+
+    connection = sqlite3.connect('tickets.db')
+    connection.row_factory = sqlite3.Row
+    return _SqliteConnection(connection)
 
 connection = get_db_connection()
 cursor = connection.cursor()
 
-# CREATE TABLE for SQL 
+# Postgres and SQLite spell an auto-incrementing primary key differently, and
+# SQLite silently gives a "SERIAL" column NULL ids instead of numbering them.
+AUTO_ID = 'SERIAL PRIMARY KEY' if use_postgres() else 'INTEGER PRIMARY KEY AUTOINCREMENT'
+
+# CREATE TABLE for SQL
 # TABLE for users
-cursor.execute('''
+cursor.execute(f'''
     CREATE TABLE IF NOT EXISTS users(
-        id SERIAL PRIMARY KEY,
+        id {AUTO_ID},
         username TEXT NOT NULL,
         role TEXT DEFAULT 'user',
         hash TEXT NOT NULL
@@ -36,9 +89,9 @@ cursor.execute('''
 ''')
 
 # TABLE for tickets
-cursor.execute('''
+cursor.execute(f'''
     CREATE TABLE IF NOT EXISTS tickets(
-        id SERIAL PRIMARY KEY,
+        id {AUTO_ID},
         user_id INTEGER NOT NULL,
         contact_name TEXT NOT NULL,
         contact_email TEXT NOT NULL,
