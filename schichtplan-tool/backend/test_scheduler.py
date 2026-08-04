@@ -2,7 +2,14 @@ import unittest
 from collections import Counter
 from datetime import date
 
-from scheduler import generate_schedule
+from baselines import greedy_first_fit
+from scheduler import (
+    AUTO,
+    CHRONOLOGICAL,
+    MOST_CONSTRAINED,
+    generate_schedule,
+    ideal_sum_squares,
+)
 
 
 def employee(id, max_shifts_per_month=None, unavailable_weekdays=None, unavailable_dates=None, allowed_shift_types=None):
@@ -147,6 +154,108 @@ class GracefulUnderStaffing(unittest.TestCase):
         result = generate_schedule(2026, 8, employees, shift_types)
 
         self.assertEqual(result['unfilled_count'], result['total_slots'] // 2)
+
+
+class Fairness(unittest.TestCase):
+    """v1.3: spread the workload evenly once every shift that can be staffed is."""
+
+    def test_workload_is_balanced_where_a_naive_pass_piles_it_on_one_person(self):
+        employees = [employee(id=i) for i in range(1, 6)]
+        shift_types = [shift_type(id=1, required_every_day=1)]
+
+        naive = greedy_first_fit(2026, 8, employees, shift_types)
+        planned = generate_schedule(2026, 8, employees, shift_types)
+
+        # First-fit always grabs the same (lowest-id) person, so one employee
+        # works the whole month while the rest work nothing.
+        self.assertEqual(naive['fairness']['spread'], 31)
+        # 31 days over 5 people cannot come out better than 7/6/6/6/6.
+        self.assertEqual(planned['fairness']['spread'], 1)
+        self.assertEqual(sorted(planned['fairness']['loads'].values()), [6, 6, 6, 6, 7])
+
+    def test_balanced_plan_is_reported_as_proven_optimal(self):
+        employees = [employee(id=i) for i in range(1, 5)]
+        shift_types = [shift_type(id=1, required_every_day=2)]
+
+        result = generate_schedule(2026, 8, employees, shift_types)
+
+        self.assertEqual(result['unfilled_count'], 0)
+        self.assertTrue(result['proven_optimal'])
+        self.assertEqual(result['fairness']['sum_squares'],
+                         ideal_sum_squares(result['total_slots'], len(employees)))
+
+    def test_fairness_never_costs_a_staffed_shift(self):
+        # Employee 2 can only work shift type 2, so a perfectly even split is
+        # impossible - filling every shift must still win over balancing them.
+        employees = [employee(id=1), employee(id=2, allowed_shift_types=[2])]
+        shift_types = [shift_type(id=1, required_every_day=1), shift_type(id=2, required_every_day=1)]
+
+        result = generate_schedule(2026, 8, employees, shift_types)
+
+        self.assertEqual(result['unfilled_count'], 0)
+
+    def test_weekend_weight_evens_out_weekend_duty(self):
+        employees = [employee(id=i) for i in range(1, 5)]
+        # Weekends need fewer people than weekdays, so weekend duty is the scarce
+        # thing that can quietly land on the same few people every month.
+        shift_types = [{'id': 1, 'requirements': {wd: (3 if wd < 5 else 1) for wd in range(7)}}]
+
+        without = generate_schedule(2026, 8, employees, shift_types, weekend_weight=0)
+        with_weight = generate_schedule(2026, 8, employees, shift_types, weekend_weight=5)
+
+        self.assertLessEqual(with_weight['fairness']['weekend_spread'],
+                             without['fairness']['weekend_spread'])
+        # Weekend equity must not come at the price of leaving shifts unstaffed.
+        self.assertEqual(with_weight['unfilled_count'], 0)
+
+
+class SlotOrdering(unittest.TestCase):
+    """v1.2: the order slots are filled in, and the adaptive choice between them."""
+
+    UNDERSTAFFED_EMPLOYEES = [
+        employee(id=1, allowed_shift_types=[1]),
+        employee(id=2, allowed_shift_types=[1], unavailable_weekdays=[5, 6]),
+        employee(id=3, allowed_shift_types=[2]),
+        employee(id=4, max_shifts_per_month=6),
+        employee(id=5, unavailable_weekdays=[0, 1, 2]),
+    ]
+    UNDERSTAFFED_SHIFTS = [shift_type(id=1, required_every_day=2), shift_type(id=2, required_every_day=2)]
+
+    def test_most_constrained_first_leaves_fewer_gaps_when_staff_are_short(self):
+        chronological = generate_schedule(
+            2026, 8, self.UNDERSTAFFED_EMPLOYEES, self.UNDERSTAFFED_SHIFTS, ordering=CHRONOLOGICAL)
+        constrained = generate_schedule(
+            2026, 8, self.UNDERSTAFFED_EMPLOYEES, self.UNDERSTAFFED_SHIFTS, ordering=MOST_CONSTRAINED)
+
+        self.assertLess(constrained['unfilled_count'], chronological['unfilled_count'])
+
+    def test_auto_falls_back_to_the_harder_search_when_gaps_appear(self):
+        auto = generate_schedule(
+            2026, 8, self.UNDERSTAFFED_EMPLOYEES, self.UNDERSTAFFED_SHIFTS, ordering=AUTO)
+        constrained = generate_schedule(
+            2026, 8, self.UNDERSTAFFED_EMPLOYEES, self.UNDERSTAFFED_SHIFTS, ordering=MOST_CONSTRAINED)
+
+        self.assertEqual(auto['unfilled_count'], constrained['unfilled_count'])
+
+    def test_auto_keeps_the_balanced_chronological_plan_when_nothing_is_short(self):
+        # A comfortably staffed month: the cheap first pass fills everything, so
+        # AUTO must not fall back to the ordering that scrambles the balance.
+        employees = [employee(id=i) for i in range(1, 7)]
+        shift_types = [shift_type(id=1, required_every_day=2)]
+
+        auto = generate_schedule(2026, 8, employees, shift_types, ordering=AUTO)
+
+        self.assertEqual(auto['unfilled_count'], 0)
+        self.assertEqual(auto['ordering_used'], CHRONOLOGICAL)
+        self.assertEqual(auto['fairness']['spread'], 1)
+
+    def test_orderings_agree_on_a_comfortably_staffed_month(self):
+        employees = [employee(id=i) for i in range(1, 7)]
+        shift_types = [shift_type(id=1, required_every_day=2)]
+
+        for ordering in (CHRONOLOGICAL, MOST_CONSTRAINED, AUTO):
+            result = generate_schedule(2026, 8, employees, shift_types, ordering=ordering)
+            self.assertEqual(result['unfilled_count'], 0, f'{ordering} left gaps')
 
 
 if __name__ == '__main__':

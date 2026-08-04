@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, MONTH_NAMES } from '../api'
 import ScheduleGrid from '../components/ScheduleGrid'
+import Distribution from '../components/Distribution'
 
 function currentMonthKey() {
   const now = new Date()
@@ -161,7 +162,15 @@ function SchedulePage({ setFlash }) {
             ) : (
               <span className="badge">Vollständig besetzt</span>
             )}
+            {schedule.distribution && (
+              <>
+                <span className="badge">Differenz {schedule.distribution.spread} Schichten</span>
+                <span className="badge">Wochenende ±{schedule.distribution.weekend_spread}</span>
+              </>
+            )}
           </div>
+
+          {schedule.distribution && <Distribution distribution={schedule.distribution} />}
 
           {warnings.length > 0 && (
             <div className="warning-list">

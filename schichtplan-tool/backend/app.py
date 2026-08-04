@@ -346,6 +346,9 @@ def fetch_schedule(year, month):
         a['manually_edited'] = bool(a['manually_edited'])
         assignments.append(a)
 
+    cursor.execute('SELECT id, name FROM employees WHERE active = 1 ORDER BY name')
+    active_employees = cursor.fetchall()
+
     connection.close()
     return {
         'id': schedule['id'],
@@ -355,6 +358,41 @@ def fetch_schedule(year, month):
         'unfilled_count': schedule['unfilled_count'],
         'generated_at': schedule['generated_at'],
         'assignments': assignments,
+        'distribution': build_distribution(assignments, active_employees),
+    }
+
+
+def build_distribution(assignments, active_employees):
+    """Shifts per employee for the month, recomputed from what is actually stored.
+
+    Deriving this from the saved assignments rather than from the generator means
+    it stays honest after HR reassigns or swaps shifts by hand.
+    """
+    totals = {row['id']: {'employee_id': row['id'], 'name': row['name'], 'total': 0, 'weekend': 0}
+              for row in active_employees}
+
+    for a in assignments:
+        employee_id = a['employee_id']
+        if employee_id is None:
+            continue
+        entry = totals.setdefault(
+            employee_id,
+            # An employee who was deactivated after the plan was generated still
+            # holds shifts in it, so they belong in the distribution.
+            {'employee_id': employee_id, 'name': a['employee_name'] or f'#{employee_id}', 'total': 0, 'weekend': 0},
+        )
+        entry['total'] += 1
+        if date.fromisoformat(a['date']).weekday() >= 5:
+            entry['weekend'] += 1
+
+    rows = sorted(totals.values(), key=lambda r: (-r['total'], r['name']))
+    counts = [r['total'] for r in rows]
+    weekend_counts = [r['weekend'] for r in rows]
+
+    return {
+        'per_employee': rows,
+        'spread': (max(counts) - min(counts)) if counts else 0,
+        'weekend_spread': (max(weekend_counts) - min(weekend_counts)) if weekend_counts else 0,
     }
 
 
