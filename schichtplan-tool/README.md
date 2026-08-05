@@ -205,6 +205,25 @@ Create a `.env` file in the `frontend` folder with:
 VITE_API_URL=http://localhost:5001
 ```
 
+## Deployment
+
+The app runs on SQLite locally and **Postgres in production**, chosen automatically: set `DATABASE_URL` and it uses Postgres, leave it unset and it writes a local `schichtplan.db`. This matters more than it sounds — a free-tier container's filesystem is wiped on every restart, so deploying on SQLite would quietly lose every schedule.
+
+**Backend (Render).** `render.yaml` in the repository root is a blueprint: pointing Render at the repo creates the web service *and* a Postgres database, wires `DATABASE_URL` between them, and generates a `SECRET_KEY`. Two values must be filled in by hand afterwards, because they depend on where the frontend lands:
+
+- `ALLOWED_ORIGINS` – the deployed frontend's origin, e.g. `https://schichtplan.vercel.app`
+- `APP_BASE_URL` – the same origin; invitation links are built from it
+
+**Frontend (Vercel).** Import the repo, set the root directory to `frontend`, and add one environment variable:
+
+- `VITE_API_URL` – the deployed backend's URL, e.g. `https://schichtplan-api.onrender.com`
+
+`frontend/vercel.json` already routes client-side paths back to `index.html`, so deep links like `/set-password?token=…` resolve instead of 404ing.
+
+**Mail.** Add `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` and `MAIL_FROM` to the backend service to send invitations for real. Without them the app still works — invitations are written to the service log instead of being sent. `backend/.env.example` lists every variable.
+
+**First run.** Opening the deployed frontend lands on "Erstes Konto einrichten"; that first account is HR and sets its own password. Everyone after that is invited by email.
+
 ## API Endpoints
 
 Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session (`401` without one). Everything that changes data also needs the HR role (`403` for an employee account).

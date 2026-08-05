@@ -135,9 +135,14 @@ def load_invitation(cursor, token):
     invitation = cursor.fetchone()
     if not invitation:
         return None
-    if datetime.fromisoformat(invitation['expires_at']) < datetime.utcnow():
+    if as_datetime(invitation['expires_at']) < datetime.utcnow():
         return None
     return dict(invitation)
+
+
+def as_datetime(value):
+    """Postgres hands back a datetime for a TIMESTAMP column; SQLite a string."""
+    return value if isinstance(value, datetime) else datetime.fromisoformat(value)
 
 
 def employee_email(cursor, employee_id):
@@ -1289,4 +1294,5 @@ def index():
 
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5001)
+    # Only used for local development; hosts run this through gunicorn instead.
+    app.run(debug=True, port=int(os.environ.get('PORT', 5001)))
