@@ -87,7 +87,7 @@ def hr_required(view):
         if not user:
             return jsonify({'message': 'Nicht angemeldet'}), 401
         if not is_hr(user):
-            return jsonify({'message': 'Nur die Personalabteilung darf das ändern'}), 403
+            return jsonify({'message': 'Nur die Personalabteilung hat darauf Zugriff'}), 403
         g.user = user
         return view(*args, **kwargs)
 
@@ -317,23 +317,15 @@ def replace_shift_requirements(connection, shift_type_id, requirements):
 # ---------- employees ----------
 
 @app.route('/employees', methods=['GET'])
-@login_required
+@hr_required
 def list_employees():
+    # HR-only: an employee account is shown its own shifts, which already carry
+    # the shift name and hours, so it never needs the roster - and the roster is
+    # colleagues' personal data.
     connection = get_db_connection()
     cursor = connection.cursor()
     cursor.execute('SELECT * FROM employees ORDER BY name')
-    rows = cursor.fetchall()
-
-    if is_hr(g.user):
-        employees = [serialize_employee(cursor, row) for row in rows]
-    else:
-        # An employee needs colleagues' names to read the plan, but not their
-        # email addresses, booked time off or contracted hours.
-        employees = [
-            {'id': row['id'], 'name': row['name'], 'active': bool(row['active'])}
-            for row in rows
-        ]
-
+    employees = [serialize_employee(cursor, row) for row in cursor.fetchall()]
     connection.close()
     return jsonify(employees)
 
@@ -421,10 +413,66 @@ def delete_employee(employee_id):
     if not cursor.fetchone():
         connection.close()
         return jsonify({'message': 'Mitarbeiter nicht gefunden'}), 404
+
+    # Deleting the roster entry out from under a login would leave an account
+    # that still works but can never show anything, so the account goes first.
+    cursor.execute('SELECT username FROM users WHERE employee_id = ?', (employee_id,))
+    linked = [row['username'] for row in cursor.fetchall()]
+    if linked:
+        connection.close()
+        return jsonify({'message':
+                        'Zuerst das verknüpfte Konto löschen: ' + ', '.join(linked)}), 400
+
     cursor.execute('DELETE FROM employees WHERE id = ?', (employee_id,))
     connection.commit()
     connection.close()
     return jsonify({'message': 'Mitarbeiter gelöscht'}), 200
+
+
+# ---------- accounts ----------
+
+@app.route('/accounts', methods=['GET'])
+@hr_required
+def list_accounts():
+    connection = get_db_connection()
+    cursor = connection.cursor()
+    cursor.execute('''
+        SELECT u.id, u.username, u.role, u.employee_id, u.created_at, e.name AS employee_name
+        FROM users u
+        LEFT JOIN employees e ON e.id = u.employee_id
+        ORDER BY u.role, u.username
+    ''')
+    accounts = [dict(row) for row in cursor.fetchall()]
+    connection.close()
+    return jsonify(accounts)
+
+
+@app.route('/accounts/<int:account_id>', methods=['DELETE'])
+@hr_required
+def delete_account(account_id):
+    if account_id == g.user['id']:
+        # Deleting the account you are signed in with would lock you out mid-session.
+        return jsonify({'message': 'Das eigene Konto kann nicht gelöscht werden'}), 400
+
+    connection = get_db_connection()
+    cursor = connection.cursor()
+    cursor.execute('SELECT id, username, role FROM users WHERE id = ?', (account_id,))
+    account = cursor.fetchone()
+    if not account:
+        connection.close()
+        return jsonify({'message': 'Konto nicht gefunden'}), 404
+
+    if account['role'] == HR_ROLE:
+        cursor.execute('SELECT COUNT(*) AS n FROM users WHERE role = ?', (HR_ROLE,))
+        if cursor.fetchone()['n'] <= 1:
+            connection.close()
+            # Without an HR account nobody could administer the tool again.
+            return jsonify({'message': 'Das letzte Personal-Konto kann nicht gelöscht werden'}), 400
+
+    cursor.execute('DELETE FROM users WHERE id = ?', (account_id,))
+    connection.commit()
+    connection.close()
+    return jsonify({'message': f'Konto {account["username"]} gelöscht'}), 200
 
 
 # ---------- shift types ----------

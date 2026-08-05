@@ -5,6 +5,7 @@ import Employees from './pages/Employees'
 import ShiftTypes from './pages/ShiftTypes'
 import Login from './pages/Login'
 import Register from './pages/Register'
+import Accounts from './pages/Accounts'
 import Flash from './Flash'
 import { api, UnauthorizedError } from './api'
 import './App.css'
@@ -129,11 +130,11 @@ function App() {
               } />
               <Route path="/register" element={
                 // Open to everyone only while no account exists yet; afterwards
-                // it is how HR adds a colleague.
+                // it becomes HR's account management screen.
                 setupRequired
                   ? <Register isSetup currentUser={null} onLoggedIn={handleLoggedIn} setFlash={setFlash} />
                   : isHr
-                    ? <Register isSetup={false} currentUser={user} onLoggedIn={handleLoggedIn} setFlash={setFlash} />
+                    ? <Accounts currentUser={user} setFlash={setFlash} />
                     : <Navigate to={user ? '/' : '/login'} replace />
               } />
               <Route path="*" element={<Navigate to={user ? '/' : (setupRequired ? '/register' : '/login')} replace />} />

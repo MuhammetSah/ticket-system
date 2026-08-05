@@ -7,7 +7,7 @@ import { api } from '../api'
  * signed-in user to add a colleague. `isSetup` tells the two apart so the
  * wording matches what the person is actually doing.
  */
-function Register({ isSetup, currentUser, onLoggedIn, setFlash }) {
+function Register({ isSetup, currentUser, onLoggedIn, setFlash, onAccountCreated }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [role, setRole] = useState('employee')
@@ -44,6 +44,7 @@ function Register({ isSetup, currentUser, onLoggedIn, setFlash }) {
         setUsername('')
         setPassword('')
         setEmployeeId('')
+        onAccountCreated?.()
       } else {
         onLoggedIn(user)
         setFlash({ type: 'success', text: `Konto angelegt. Willkommen, ${user.username}.` })
@@ -57,7 +58,7 @@ function Register({ isSetup, currentUser, onLoggedIn, setFlash }) {
   }
 
   return (
-    <div className="panel panel-narrow">
+    <div className={`panel ${currentUser ? '' : 'panel-narrow'}`}>
       <h2>{currentUser ? 'Kollegin oder Kollegen hinzufügen' : 'Erstes Konto einrichten'}</h2>
       <p className="hint">
         {currentUser
@@ -99,14 +100,19 @@ function Register({ isSetup, currentUser, onLoggedIn, setFlash }) {
             </div>
             {role === 'employee' && (
               <div className="field">
-                <label htmlFor="register-employee">Mit Mitarbeiter verknüpfen (optional)</label>
-                <select id="register-employee" value={employeeId} onChange={e => setEmployeeId(e.target.value)}>
-                  <option value="">— keine Verknüpfung —</option>
+                <label htmlFor="register-employee">Mit Mitarbeiter verknüpfen</label>
+                <select
+                  id="register-employee"
+                  value={employeeId}
+                  onChange={e => setEmployeeId(e.target.value)}
+                  required
+                >
+                  <option value="">— bitte auswählen —</option>
                   {employees.map(emp => (
                     <option key={emp.id} value={emp.id}>{emp.name}</option>
                   ))}
                 </select>
-                <p className="hint">Eigene Schichten werden im Kalender hervorgehoben.</p>
+                <p className="hint">Legt fest, wessen Schichten dieses Konto sieht.</p>
               </div>
             )}
           </>

@@ -25,9 +25,13 @@ function SchedulePage({ setFlash, user }) {
 
   async function loadStaticData() {
     try {
-      const [emps, types] = await Promise.all([api.get('/employees'), api.get('/shift-types')])
-      setEmployees(emps)
+      // Shift types drive the columns for everyone, but the roster is HR-only -
+      // an employee is shown their own shifts and never needs the staff list.
+      const types = await api.get('/shift-types')
       setShiftTypes(types)
+      if (user?.role === 'hr') {
+        setEmployees(await api.get('/employees'))
+      }
     } catch (err) {
       setFlash({ type: 'error', text: err.message })
     }

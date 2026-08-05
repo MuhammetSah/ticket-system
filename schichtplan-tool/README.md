@@ -11,9 +11,9 @@ Industry-independent shift planning for HR: define employees with constraints (e
 Two kinds of account:
 
 - **Personalabteilung (HR)** – creates, edits and deletes everything: employees, shift types, generated plans, and accounts. Sees the whole plan.
-- **Mitarbeiter (employee)** – read-only, and only their *own* shifts. Colleagues' shifts, gaps in the plan and the workload comparison are never sent to them at all. Every write is refused by the API, not just hidden in the UI.
+- **Mitarbeiter (employee)** – read-only, and only their *own* shifts. Colleagues' shifts, the staff roster, gaps in the plan and the workload comparison are never sent to them at all. Every write is refused by the API, not just hidden in the UI.
 
-Being scheduled does not require an account — an employee only needs one if they should be able to look their own shifts up. Each employee account is linked to its roster entry, which is what makes "own shifts" meaningful, so the link is required when the account is created.
+Being scheduled does not require an account — an employee only needs one if they should be able to look their own shifts up. Each employee account is linked to its roster entry, which is what makes "own shifts" meaningful, so the link is required when the account is created. Because of that link an employee cannot be deleted while an account still points at them: the account has to go first, which HR does on the Konten page. Nobody can delete the account they are signed in with, or the last remaining HR account.
 
 ## Scope
 
@@ -145,8 +145,9 @@ schichtplan-tool/
         ├── App.jsx           # Routing, navigation & auth guarding
         ├── api.js            # Fetch helper + shared constants
         ├── pages/
-        │   ├── Login.jsx          # HR sign-in
-        │   ├── Register.jsx       # First-account setup / add a colleague
+        │   ├── Login.jsx          # Sign-in
+        │   ├── Register.jsx       # First-account setup / the create-account form
+        │   ├── Accounts.jsx       # HR: who can sign in, and removing accounts
         │   ├── Employees.jsx     # Employee CRUD + constraints
         │   ├── ShiftTypes.jsx    # Shift type CRUD + weekday requirements
         │   └── SchedulePage.jsx  # Generate / view / edit the monthly plan
@@ -206,6 +207,8 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 | Method | Route                          | Description                                              |
 |--------|----------------------------------|------------------------------------------------------------|
 | POST   | `/register`                     | Create the first HR account, or (as HR) add an account with a role |
+| GET    | `/accounts`                     | List sign-in accounts (HR)                                          |
+| DELETE | `/accounts/<id>`                | Delete an account (HR; not your own, not the last HR one)           |
 | POST   | `/login`                        | Sign in                                                      |
 | POST   | `/logout`                       | Sign out                                                      |
 | GET    | `/me`                           | Current user, or `401` with `setup_required` on a fresh install |
