@@ -407,6 +407,12 @@ button.btn-small {
   flex-shrink: 0;
 }
 
+.badge-pending {
+  background-color: #fffbeb;
+  color: #92400e;
+  border-color: #fde68a;
+}
+
 .badge-inactive {
   background-color: #fee2e2;
   color: #991b1b;

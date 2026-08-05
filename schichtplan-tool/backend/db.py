@@ -34,6 +34,21 @@ def init_db():
         )
     ''')
 
+    # One open invitation per account. HR never sees the token: it goes out by
+    # email, so the person sets a password only they know. Only a SHA-256 of the
+    # token is stored, so a copy of the database cannot be used to claim an
+    # account - the token itself is 256 bits of randomness, which is why an
+    # unsalted digest is enough here.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS password_invitations(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+            token_hash TEXT NOT NULL,
+            expires_at TIMESTAMP NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
     # Databases created before roles existed only have the original columns.
     cursor.execute('PRAGMA table_info(users)')
     user_columns = {row['name'] for row in cursor.fetchall()}

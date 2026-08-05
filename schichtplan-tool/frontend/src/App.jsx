@@ -6,6 +6,7 @@ import ShiftTypes from './pages/ShiftTypes'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import Accounts from './pages/Accounts'
+import SetPassword from './pages/SetPassword'
 import Flash from './Flash'
 import { api, UnauthorizedError } from './api'
 import './App.css'
@@ -124,6 +125,8 @@ function App() {
                   <ShiftTypes setFlash={setFlash} />
                 </RequireAuth>
               } />
+              {/* Public: the token from the invitation email is the credential. */}
+              <Route path="/set-password" element={<SetPassword setFlash={setFlash} />} />
               <Route path="/login" element={
                 user ? <Navigate to="/" replace />
                      : <Login onLoggedIn={handleLoggedIn} setFlash={setFlash} />

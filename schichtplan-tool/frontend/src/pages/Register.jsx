@@ -16,6 +16,11 @@ function Register({ isSetup, currentUser, onLoggedIn, setFlash, onAccountCreated
   const [busy, setBusy] = useState(false)
   const navigate = useNavigate()
 
+  // An employee account gets its password from the invitation email, so the
+  // password field does not belong on this form at all for that role.
+  const invitesByEmail = Boolean(currentUser) && role === 'employee'
+  const selectedEmployee = employees.find(e => String(e.id) === String(employeeId))
+
   // Only HR can link a new read-only account to a roster entry.
   useEffect(() => {
     if (!currentUser) return
@@ -30,7 +35,9 @@ function Register({ isSetup, currentUser, onLoggedIn, setFlash, onAccountCreated
     e.preventDefault()
     setBusy(true)
     try {
-      const payload = { username, password }
+      // Employee accounts never receive a password here - they are invited by
+      // email and choose their own, so HR cannot know it.
+      const payload = invitesByEmail ? { username } : { username, password }
       if (currentUser) {
         payload.role = role
         if (role === 'employee' && employeeId) {
@@ -40,7 +47,14 @@ function Register({ isSetup, currentUser, onLoggedIn, setFlash, onAccountCreated
       const user = await api.post('/register', payload)
       if (currentUser) {
         // An existing user stays signed in as themselves after adding someone.
-        setFlash({ type: 'success', text: `Konto für ${user.username} angelegt.` })
+        setFlash({
+          type: 'success',
+          text: user.invitation_email
+            ? (user.invitation_sent
+                ? `Konto angelegt. Einladung an ${user.invitation_email} gesendet.`
+                : `Konto angelegt. Einladung für ${user.invitation_email} erstellt — kein SMTP konfiguriert, der Link steht im Server-Log.`)
+            : `Konto für ${user.username} angelegt.`,
+        })
         setUsername('')
         setPassword('')
         setEmployeeId('')
@@ -76,19 +90,21 @@ function Register({ isSetup, currentUser, onLoggedIn, setFlash, onAccountCreated
             required
           />
         </div>
-        <div className="field">
-          <label htmlFor="register-password">Passwort</label>
-          <input
-            id="register-password"
-            type="password"
-            autoComplete="new-password"
-            minLength={8}
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            required
-          />
-          <p className="hint">Mindestens 8 Zeichen.</p>
-        </div>
+        {!invitesByEmail && (
+          <div className="field">
+            <label htmlFor="register-password">Passwort</label>
+            <input
+              id="register-password"
+              type="password"
+              autoComplete="new-password"
+              minLength={8}
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              required
+            />
+            <p className="hint">Mindestens 8 Zeichen.</p>
+          </div>
+        )}
         {currentUser && (
           <>
             <div className="field">
@@ -115,10 +131,26 @@ function Register({ isSetup, currentUser, onLoggedIn, setFlash, onAccountCreated
                 <p className="hint">Legt fest, wessen Schichten dieses Konto sieht.</p>
               </div>
             )}
+            {invitesByEmail && (
+              <div className="field">
+                {selectedEmployee && !selectedEmployee.email ? (
+                  <p className="warning-list">
+                    {selectedEmployee.name} hat keine E-Mail-Adresse hinterlegt. Bitte zuerst unter
+                    „Mitarbeiter“ ergänzen — ohne Adresse kann keine Einladung verschickt werden.
+                  </p>
+                ) : (
+                  <p className="hint">
+                    Es wird kein Passwort vergeben: {selectedEmployee
+                      ? <>die Person erhält eine Einladung an <strong>{selectedEmployee.email}</strong> und</>
+                      : 'die Person erhält eine Einladung per E-Mail und'} setzt ihr Passwort selbst.
+                  </p>
+                )}
+              </div>
+            )}
           </>
         )}
-        <button type="submit" disabled={busy}>
-          {busy ? 'Speichern …' : (currentUser ? 'Konto anlegen' : 'Konto einrichten')}
+        <button type="submit" disabled={busy || (invitesByEmail && selectedEmployee && !selectedEmployee.email)}>
+          {busy ? 'Speichern …' : (invitesByEmail ? 'Konto anlegen und einladen' : (currentUser ? 'Konto anlegen' : 'Konto einrichten'))}
         </button>
       </form>
       {!currentUser && !isSetup && (

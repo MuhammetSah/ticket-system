@@ -27,6 +27,7 @@ Being scheduled does not require an account — an employee only needs one if th
 ## Features
 
 - **Authentication and roles** – session-based login with hashed passwords (Werkzeug). Every route that touches staff data requires a session, and every route that *changes* anything requires the HR role. Registration is open only until the first account exists — a fresh install sends you straight to setup; afterwards only HR can create accounts, so nobody can sign themselves up and read the roster
+- **Employees set their own password** – HR never types a password for an employee. Creating the account emails that person a one-time link (valid 7 days, single use) on which they choose a password nobody else has seen. Until they do, the account cannot be signed into. HR can re-invite, which also revokes an existing password — that doubles as the "forgotten password" path without HR ever learning the new one
 - **Two views of the plan** – a **calendar** laid out like a wall planner (one column per weekday, one row per week, each day listing its shifts and everyone working them), and a **table** for editing. HR gets both; employees get both read-only
 - **Several people per shift** – each shift type carries a required headcount *per weekday*, so a weekday can need 2 on the early shift and 3 on the late one while a Sunday needs 1 of each. The scheduler fills each of those places separately and the calendar lists everyone assigned
 - **Day-level changes** – beyond the shift type's usual hours (e.g. 08:00–16:30), HR can change what a shift runs on one single date without touching any other day, and can add or remove a place on a given day. Changed hours are marked with `*` in both views and can be reset to the shift type's default in one click
@@ -134,6 +135,7 @@ schichtplan-tool/
 ├── backend/
 │   ├── app.py                 # Flask app: REST routes
 │   ├── db.py                   # SQLite schema + connection
+│   ├── mailer.py               # Invitation email (SMTP, or logged in dev)
 │   ├── scheduler.py            # Backtracking scheduler (ordering + fairness)
 │   ├── baselines.py            # Alternative algorithms, for comparison only
 │   ├── benchmark.py            # Head-to-head comparison run
@@ -147,7 +149,8 @@ schichtplan-tool/
         ├── pages/
         │   ├── Login.jsx          # Sign-in
         │   ├── Register.jsx       # First-account setup / the create-account form
-        │   ├── Accounts.jsx       # HR: who can sign in, and removing accounts
+        │   ├── Accounts.jsx       # HR: who can sign in, invites, removing accounts
+        │   ├── SetPassword.jsx    # Where an invited employee picks their password
         │   ├── Employees.jsx     # Employee CRUD + constraints
         │   ├── ShiftTypes.jsx    # Shift type CRUD + weekday requirements
         │   └── SchedulePage.jsx  # Generate / view / edit the monthly plan
@@ -170,6 +173,8 @@ python3 -m venv venv
 Runs by default on `http://localhost:5001` (chosen so it doesn't collide with the ticket-system backend on port 5000 if both run locally at once). Uses a local SQLite file (`schichtplan.db`, gitignored); the schema is created automatically on first run.
 
 On first launch the app has no accounts, so opening it lands on "Erstes Konto einrichten" to create one. In production also set `SECRET_KEY` (it signs the session cookie — the built-in fallback is for local use only) and `ALLOWED_ORIGINS` (comma-separated list of frontend origins allowed to call the API).
+
+**Invitation emails.** Set `SMTP_HOST` (plus `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_USE_TLS`, `MAIL_FROM`) to send them for real, and `APP_BASE_URL` so the link points at the deployed frontend. Without `SMTP_HOST` — which is the default locally — the invitation is written to the server log instead of being sent, so the flow still works end to end. The link is deliberately never returned through the API: only the recipient is supposed to learn the token.
 
 Run the scheduler's unit tests with:
 
@@ -209,6 +214,9 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 | POST   | `/register`                     | Create the first HR account, or (as HR) add an account with a role |
 | GET    | `/accounts`                     | List sign-in accounts (HR)                                          |
 | DELETE | `/accounts/<id>`                | Delete an account (HR; not your own, not the last HR one)           |
+| POST   | `/accounts/<id>/invitation`     | Send a fresh invitation, revoking any existing password (HR)         |
+| GET    | `/invitations/<token>`          | Public: is this invitation link still valid?                         |
+| POST   | `/invitations/<token>`          | Public: the invitee sets their own password                          |
 | POST   | `/login`                        | Sign in                                                      |
 | POST   | `/logout`                       | Sign out                                                      |
 | GET    | `/me`                           | Current user, or `401` with `setup_required` on a fresh install |

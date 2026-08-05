@@ -1,11 +1,14 @@
+import hashlib
 import os
-from datetime import date
+import secrets
+from datetime import date, datetime, timedelta
 from functools import wraps
 
 from flask import Flask, g, jsonify, request, session
 from flask_cors import CORS
 from werkzeug.security import check_password_hash, generate_password_hash
 
+import mailer
 from db import get_db_connection, init_db, WEEKDAYS
 from scheduler import generate_schedule
 
@@ -99,16 +102,58 @@ def count_users(cursor):
     return cursor.fetchone()['n']
 
 
+# ---------- password invitations ----------
+
+INVITATION_VALID_DAYS = 7
+MIN_PASSWORD_LENGTH = 8
+
+
+def hash_token(token):
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def issue_invitation(cursor, user_id):
+    """Replaces any open invitation, so a resend invalidates the previous link."""
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.utcnow() + timedelta(days=INVITATION_VALID_DAYS)
+    cursor.execute('DELETE FROM password_invitations WHERE user_id = ?', (user_id,))
+    cursor.execute(
+        'INSERT INTO password_invitations (user_id, token_hash, expires_at) VALUES (?, ?, ?)',
+        (user_id, hash_token(token), expires_at.isoformat(timespec='seconds')),
+    )
+    return token
+
+
+def load_invitation(cursor, token):
+    """The account a token belongs to, or None if unknown or expired."""
+    cursor.execute('''
+        SELECT i.id, i.user_id, i.expires_at, u.username
+        FROM password_invitations i
+        JOIN users u ON u.id = i.user_id
+        WHERE i.token_hash = ?
+    ''', (hash_token(token),))
+    invitation = cursor.fetchone()
+    if not invitation:
+        return None
+    if datetime.fromisoformat(invitation['expires_at']) < datetime.utcnow():
+        return None
+    return dict(invitation)
+
+
+def employee_email(cursor, employee_id):
+    cursor.execute('SELECT name, email FROM employees WHERE id = ?', (employee_id,))
+    row = cursor.fetchone()
+    return dict(row) if row else None
+
+
 @app.route('/register', methods=['POST'])
 def register():
     data = request.get_json(silent=True) or {}
     username = (data.get('username') or '').strip()
     password = data.get('password') or ''
 
-    if not username or not password:
-        return jsonify({'message': 'Benutzername und Passwort sind erforderlich'}), 400
-    if len(password) < 8:
-        return jsonify({'message': 'Das Passwort muss mindestens 8 Zeichen lang sein'}), 400
+    if not username:
+        return jsonify({'message': 'Benutzername ist erforderlich'}), 400
 
     connection = get_db_connection()
     cursor = connection.cursor()
@@ -131,36 +176,72 @@ def register():
         return jsonify({'message': 'Unbekannte Rolle'}), 400
 
     employee_id = data.get('employee_id') if role == EMPLOYEE_ROLE else None
+    recipient = None
     if role == EMPLOYEE_ROLE:
         # An employee account shows that person's own shifts, so it is useless
         # until it knows whose shifts those are.
         if employee_id is None:
             connection.close()
             return jsonify({'message': 'Ein Mitarbeiter-Konto muss mit einem Mitarbeiter verknüpft werden'}), 400
-        cursor.execute('SELECT id FROM employees WHERE id = ?', (employee_id,))
-        if not cursor.fetchone():
+        recipient = employee_email(cursor, employee_id)
+        if not recipient:
             connection.close()
             return jsonify({'message': 'Mitarbeiter nicht gefunden'}), 404
+        # The invitation is the only way this account gets a password, so
+        # without an address there is nowhere to send it.
+        if not recipient['email']:
+            connection.close()
+            return jsonify({'message':
+                            f'{recipient["name"]} hat keine E-Mail-Adresse. '
+                            'Bitte zuerst beim Mitarbeiter hinterlegen.'}), 400
+    else:
+        # HR accounts still choose their password directly: they have no roster
+        # entry and therefore no address to invite.
+        if not password:
+            connection.close()
+            return jsonify({'message': 'Passwort ist erforderlich'}), 400
+        if len(password) < MIN_PASSWORD_LENGTH:
+            connection.close()
+            return jsonify({'message': f'Das Passwort muss mindestens {MIN_PASSWORD_LENGTH} Zeichen lang sein'}), 400
 
     cursor.execute('SELECT id FROM users WHERE username = ?', (username,))
     if cursor.fetchone():
         connection.close()
         return jsonify({'message': 'Benutzername ist bereits vergeben'}), 400
 
+    # An empty hash marks an account that cannot be signed into yet. Employee
+    # accounts start that way so nobody, HR included, ever knows the password.
+    password_hash = '' if role == EMPLOYEE_ROLE else generate_password_hash(password)
     cursor.execute(
         'INSERT INTO users (username, hash, role, employee_id) VALUES (?, ?, ?, ?)',
-        (username, generate_password_hash(password), role, employee_id),
+        (username, password_hash, role, employee_id),
     )
     user_id = cursor.lastrowid
-    connection.commit()
-    connection.close()
+
+    invitation_sent = None
+    if role == EMPLOYEE_ROLE:
+        token = issue_invitation(cursor, user_id)
+        connection.commit()
+        connection.close()
+        invitation_sent = mailer.send_invitation(
+            recipient['email'], username, token, INVITATION_VALID_DAYS)
+    else:
+        connection.commit()
+        connection.close()
 
     # Signing in the very first user saves them an immediate second step; HR
     # adding a colleague must stay logged in as themselves.
     if first_account:
         session['user_id'] = user_id
 
-    return jsonify({'id': user_id, 'username': username, 'role': role, 'employee_id': employee_id}), 201
+    return jsonify({
+        'id': user_id,
+        'username': username,
+        'role': role,
+        'employee_id': employee_id,
+        'invitation_email': recipient['email'] if recipient else None,
+        'invitation_sent': invitation_sent,
+    }), 201
 
 
 @app.route('/login', methods=['POST'])
@@ -174,6 +255,14 @@ def login():
     cursor.execute('SELECT * FROM users WHERE username = ?', (username,))
     user = cursor.fetchone()
     connection.close()
+
+    # An invited account has no password yet. Saying so is safe - the invitation
+    # went to that person's mailbox, not to whoever is guessing here - and it is
+    # far more useful than "wrong password" to someone who never set one.
+    if user and not user['hash']:
+        return jsonify({'message':
+                        'Für dieses Konto wurde noch kein Passwort vergeben. '
+                        'Bitte den Link aus der Einladungs-E-Mail verwenden.'}), 403
 
     # Same message either way, so the response cannot be used to find out which
     # usernames exist.
@@ -194,6 +283,46 @@ def login():
 def logout():
     session.clear()
     return jsonify({'message': 'Abgemeldet'}), 200
+
+
+@app.route('/invitations/<token>', methods=['GET'])
+def check_invitation(token):
+    """Public: does this link still work? Used to greet the invitee by name."""
+    connection = get_db_connection()
+    cursor = connection.cursor()
+    invitation = load_invitation(cursor, token)
+    connection.close()
+
+    if not invitation:
+        return jsonify({'message': 'Dieser Link ist ungültig oder abgelaufen'}), 404
+    return jsonify({'username': invitation['username']}), 200
+
+
+@app.route('/invitations/<token>', methods=['POST'])
+def redeem_invitation(token):
+    """Public: the invitee sets their own password, which nobody else has seen."""
+    data = request.get_json(silent=True) or {}
+    password = data.get('password') or ''
+
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return jsonify({'message': f'Das Passwort muss mindestens {MIN_PASSWORD_LENGTH} Zeichen lang sein'}), 400
+
+    connection = get_db_connection()
+    cursor = connection.cursor()
+    invitation = load_invitation(cursor, token)
+    if not invitation:
+        connection.close()
+        return jsonify({'message': 'Dieser Link ist ungültig oder abgelaufen'}), 404
+
+    cursor.execute('UPDATE users SET hash = ? WHERE id = ?',
+                   (generate_password_hash(password), invitation['user_id']))
+    # Single use: the link stops working the moment it has been redeemed.
+    cursor.execute('DELETE FROM password_invitations WHERE id = ?', (invitation['id'],))
+    connection.commit()
+    connection.close()
+
+    return jsonify({'username': invitation['username'],
+                    'message': 'Passwort gesetzt. Sie können sich jetzt anmelden.'}), 200
 
 
 @app.route('/me', methods=['GET'])
@@ -437,14 +566,59 @@ def list_accounts():
     connection = get_db_connection()
     cursor = connection.cursor()
     cursor.execute('''
-        SELECT u.id, u.username, u.role, u.employee_id, u.created_at, e.name AS employee_name
+        SELECT u.id, u.username, u.role, u.employee_id, u.created_at,
+               e.name AS employee_name, e.email AS employee_email,
+               (u.hash != '') AS password_set,
+               (i.id IS NOT NULL) AS invitation_pending
         FROM users u
         LEFT JOIN employees e ON e.id = u.employee_id
+        LEFT JOIN password_invitations i ON i.user_id = u.id
         ORDER BY u.role, u.username
     ''')
-    accounts = [dict(row) for row in cursor.fetchall()]
+    accounts = []
+    for row in cursor.fetchall():
+        account = dict(row)
+        account['password_set'] = bool(account['password_set'])
+        account['invitation_pending'] = bool(account['invitation_pending'])
+        accounts.append(account)
     connection.close()
     return jsonify(accounts)
+
+
+@app.route('/accounts/<int:account_id>/invitation', methods=['POST'])
+@hr_required
+def resend_invitation(account_id):
+    """Send a fresh invitation, e.g. when the first one expired or went astray."""
+    connection = get_db_connection()
+    cursor = connection.cursor()
+    cursor.execute('SELECT id, username, role, employee_id, hash FROM users WHERE id = ?', (account_id,))
+    account = cursor.fetchone()
+    if not account:
+        connection.close()
+        return jsonify({'message': 'Konto nicht gefunden'}), 404
+
+    if account['role'] != EMPLOYEE_ROLE:
+        connection.close()
+        return jsonify({'message': 'Nur Mitarbeiter-Konten werden per E-Mail eingeladen'}), 400
+
+    recipient = employee_email(cursor, account['employee_id']) if account['employee_id'] else None
+    if not recipient or not recipient['email']:
+        connection.close()
+        return jsonify({'message': 'Für dieses Konto ist keine E-Mail-Adresse hinterlegt'}), 400
+
+    token = issue_invitation(cursor, account_id)
+    # Re-inviting also revokes the current password, so a forgotten one can be
+    # replaced without HR ever setting it.
+    cursor.execute("UPDATE users SET hash = '' WHERE id = ?", (account_id,))
+    connection.commit()
+    connection.close()
+
+    sent = mailer.send_invitation(recipient['email'], account['username'], token, INVITATION_VALID_DAYS)
+    return jsonify({
+        'message': f'Einladung an {recipient["email"]} gesendet' if sent
+                   else f'Einladung für {recipient["email"]} erstellt (kein SMTP konfiguriert - Link steht im Server-Log)',
+        'invitation_sent': sent,
+    }), 200
 
 
 @app.route('/accounts/<int:account_id>', methods=['DELETE'])

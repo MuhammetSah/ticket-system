@@ -25,6 +25,16 @@ function Accounts({ currentUser, setFlash }) {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load() }, [load])
 
+  async function resendInvitation(account) {
+    try {
+      const result = await api.post(`/accounts/${account.id}/invitation`, {})
+      setFlash({ type: 'success', text: result.message })
+      load()
+    } catch (err) {
+      setFlash({ type: 'error', text: err.message })
+    }
+  }
+
   async function deleteAccount(account) {
     if (!confirm(`Konto "${account.username}" wirklich löschen?`)) return
     try {
@@ -62,9 +72,24 @@ function Accounts({ currentUser, setFlash }) {
                       {account.role === 'hr' ? 'Personalabteilung' : 'Mitarbeiter'}
                     </span>
                     {account.employee_name && <span className="badge">verknüpft mit {account.employee_name}</span>}
+                    {account.invitation_pending && (
+                      <span className="badge badge-pending">Einladung offen</span>
+                    )}
+                    {!account.password_set && !account.invitation_pending && (
+                      <span className="badge badge-inactive">Kein Passwort gesetzt</span>
+                    )}
                   </div>
                 </div>
                 <div className="item-actions">
+                  {account.role === 'employee' && (
+                    <button
+                      className="btn-secondary btn-small"
+                      title="Neuen Einladungslink per E-Mail schicken; ein bestehendes Passwort wird dabei ungültig"
+                      onClick={() => resendInvitation(account)}
+                    >
+                      {account.password_set ? 'Neu einladen' : 'Einladung erneut senden'}
+                    </button>
+                  )}
                   <button
                     className="btn-danger btn-small"
                     disabled={account.id === currentUser.id}
