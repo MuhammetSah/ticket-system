@@ -72,6 +72,7 @@ function Accounts({ currentUser, setFlash }) {
                       {account.role === 'hr' ? 'Personalabteilung' : 'Mitarbeiter'}
                     </span>
                     {account.employee_name && <span className="badge">verknüpft mit {account.employee_name}</span>}
+                    {account.contact_email && <span className="badge">{account.contact_email}</span>}
                     {account.invitation_pending && (
                       <span className="badge badge-pending">Einladung offen</span>
                     )}
@@ -81,13 +82,13 @@ function Accounts({ currentUser, setFlash }) {
                   </div>
                 </div>
                 <div className="item-actions">
-                  {account.role === 'employee' && (
+                  {account.contact_email && account.id !== currentUser.id && (
                     <button
                       className="btn-secondary btn-small"
                       title="Neuen Einladungslink per E-Mail schicken; ein bestehendes Passwort wird dabei ungültig"
                       onClick={() => resendInvitation(account)}
                     >
-                      {account.password_set ? 'Neu einladen' : 'Einladung erneut senden'}
+                      {account.password_set ? 'Passwort zurücksetzen' : 'Einladung erneut senden'}
                     </button>
                   )}
                   <button

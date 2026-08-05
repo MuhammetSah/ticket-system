@@ -10,16 +10,20 @@ import { api } from '../api'
 function Register({ isSetup, currentUser, onLoggedIn, setFlash, onAccountCreated }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [email, setEmail] = useState('')
   const [role, setRole] = useState('employee')
   const [employeeId, setEmployeeId] = useState('')
   const [employees, setEmployees] = useState([])
   const [busy, setBusy] = useState(false)
   const navigate = useNavigate()
 
-  // An employee account gets its password from the invitation email, so the
-  // password field does not belong on this form at all for that role.
-  const invitesByEmail = Boolean(currentUser) && role === 'employee'
+  // Every account created by somebody else is invited, so the creator never
+  // picks the password. Only the very first account sets one here.
+  const invitesByEmail = Boolean(currentUser)
   const selectedEmployee = employees.find(e => String(e.id) === String(employeeId))
+  // An employee's address comes from the roster entry; HR types one in.
+  const employeeMissingEmail = role === 'employee' && selectedEmployee && !selectedEmployee.email
+  const invitationTarget = role === 'employee' ? selectedEmployee?.email : email
 
   // Only HR can link a new read-only account to a roster entry.
   useEffect(() => {
@@ -38,6 +42,7 @@ function Register({ isSetup, currentUser, onLoggedIn, setFlash, onAccountCreated
       // Employee accounts never receive a password here - they are invited by
       // email and choose their own, so HR cannot know it.
       const payload = invitesByEmail ? { username } : { username, password }
+      if (email) payload.email = email
       if (currentUser) {
         payload.role = role
         if (role === 'employee' && employeeId) {
@@ -57,6 +62,7 @@ function Register({ isSetup, currentUser, onLoggedIn, setFlash, onAccountCreated
         })
         setUsername('')
         setPassword('')
+        setEmail('')
         setEmployeeId('')
         onAccountCreated?.()
       } else {
@@ -105,6 +111,20 @@ function Register({ isSetup, currentUser, onLoggedIn, setFlash, onAccountCreated
             <p className="hint">Mindestens 8 Zeichen.</p>
           </div>
         )}
+        {!currentUser && (
+          <div className="field">
+            <label htmlFor="setup-email">E-Mail-Adresse (optional)</label>
+            <input
+              id="setup-email"
+              type="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+            />
+            <p className="hint">
+              Nur nötig, falls Sie Ihr Passwort später einmal per Einladungslink zurücksetzen möchten.
+            </p>
+          </div>
+        )}
         {currentUser && (
           <>
             <div className="field">
@@ -131,26 +151,37 @@ function Register({ isSetup, currentUser, onLoggedIn, setFlash, onAccountCreated
                 <p className="hint">Legt fest, wessen Schichten dieses Konto sieht.</p>
               </div>
             )}
-            {invitesByEmail && (
+            {role === 'hr' && (
               <div className="field">
-                {selectedEmployee && !selectedEmployee.email ? (
-                  <p className="warning-list">
-                    {selectedEmployee.name} hat keine E-Mail-Adresse hinterlegt. Bitte zuerst unter
-                    „Mitarbeiter“ ergänzen — ohne Adresse kann keine Einladung verschickt werden.
-                  </p>
-                ) : (
-                  <p className="hint">
-                    Es wird kein Passwort vergeben: {selectedEmployee
-                      ? <>die Person erhält eine Einladung an <strong>{selectedEmployee.email}</strong> und</>
-                      : 'die Person erhält eine Einladung per E-Mail und'} setzt ihr Passwort selbst.
-                  </p>
-                )}
+                <label htmlFor="register-email">E-Mail-Adresse</label>
+                <input
+                  id="register-email"
+                  type="email"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  required
+                />
+                <p className="hint">Dorthin geht die Einladung.</p>
               </div>
             )}
+            <div className="field">
+              {employeeMissingEmail ? (
+                <p className="warning-list">
+                  {selectedEmployee.name} hat keine E-Mail-Adresse hinterlegt. Bitte zuerst unter
+                  „Mitarbeiter“ ergänzen — ohne Adresse kann keine Einladung verschickt werden.
+                </p>
+              ) : (
+                <p className="hint">
+                  Es wird kein Passwort vergeben: {invitationTarget
+                    ? <>die Person erhält eine Einladung an <strong>{invitationTarget}</strong> und</>
+                    : 'die Person erhält eine Einladung per E-Mail und'} setzt ihr Passwort selbst.
+                </p>
+              )}
+            </div>
           </>
         )}
-        <button type="submit" disabled={busy || (invitesByEmail && selectedEmployee && !selectedEmployee.email)}>
-          {busy ? 'Speichern …' : (invitesByEmail ? 'Konto anlegen und einladen' : (currentUser ? 'Konto anlegen' : 'Konto einrichten'))}
+        <button type="submit" disabled={busy || employeeMissingEmail}>
+          {busy ? 'Speichern …' : (invitesByEmail ? 'Konto anlegen und einladen' : 'Konto einrichten')}
         </button>
       </form>
       {!currentUser && !isSetup && (

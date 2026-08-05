@@ -30,6 +30,7 @@ def init_db():
             hash TEXT NOT NULL,
             role TEXT NOT NULL DEFAULT 'hr',
             employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+            email TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
@@ -57,6 +58,10 @@ def init_db():
         cursor.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'hr'")
     if 'employee_id' not in user_columns:
         cursor.execute('ALTER TABLE users ADD COLUMN employee_id INTEGER REFERENCES employees(id)')
+    if 'email' not in user_columns:
+        # Where an HR account's invitation goes. Employee accounts take theirs
+        # from the linked roster entry instead, so it is not duplicated here.
+        cursor.execute('ALTER TABLE users ADD COLUMN email TEXT')
 
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS employees(

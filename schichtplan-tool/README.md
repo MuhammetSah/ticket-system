@@ -27,7 +27,7 @@ Being scheduled does not require an account — an employee only needs one if th
 ## Features
 
 - **Authentication and roles** – session-based login with hashed passwords (Werkzeug). Every route that touches staff data requires a session, and every route that *changes* anything requires the HR role. Registration is open only until the first account exists — a fresh install sends you straight to setup; afterwards only HR can create accounts, so nobody can sign themselves up and read the roster
-- **Employees set their own password** – HR never types a password for an employee. Creating the account emails that person a one-time link (valid 7 days, single use) on which they choose a password nobody else has seen. Until they do, the account cannot be signed into. HR can re-invite, which also revokes an existing password — that doubles as the "forgotten password" path without HR ever learning the new one
+- **Nobody sets anyone else's password** – whoever creates an account never chooses its password. Creating one emails that person a one-time link (valid 7 days, single use) on which they pick a password nobody else has seen; until they do, the account cannot be signed into. This applies to employee *and* HR accounts alike — an employee's invitation goes to the address on their roster entry, an HR account carries its own. The only exception is the very first account on a fresh install, which sets its own password because there is nobody yet to invite it. Re-inviting issues a fresh link and revokes the current password, which doubles as the "forgotten password" path without anyone else learning the new one
 - **Two views of the plan** – a **calendar** laid out like a wall planner (one column per weekday, one row per week, each day listing its shifts and everyone working them), and a **table** for editing. HR gets both; employees get both read-only
 - **Several people per shift** – each shift type carries a required headcount *per weekday*, so a weekday can need 2 on the early shift and 3 on the late one while a Sunday needs 1 of each. The scheduler fills each of those places separately and the calendar lists everyone assigned
 - **Day-level changes** – beyond the shift type's usual hours (e.g. 08:00–16:30), HR can change what a shift runs on one single date without touching any other day, and can add or remove a place on a given day. Changed hours are marked with `*` in both views and can be reset to the shift type's default in one click
@@ -211,10 +211,10 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 
 | Method | Route                          | Description                                              |
 |--------|----------------------------------|------------------------------------------------------------|
-| POST   | `/register`                     | Create the first HR account, or (as HR) add an account with a role |
+| POST   | `/register`                     | Create the first HR account (sets its own password), or (as HR) add an account, which is invited by email |
 | GET    | `/accounts`                     | List sign-in accounts (HR)                                          |
 | DELETE | `/accounts/<id>`                | Delete an account (HR; not your own, not the last HR one)           |
-| POST   | `/accounts/<id>/invitation`     | Send a fresh invitation, revoking any existing password (HR)         |
+| POST   | `/accounts/<id>/invitation`     | Send a fresh invitation to any account, revoking its password (HR)   |
 | GET    | `/invitations/<token>`          | Public: is this invitation link still valid?                         |
 | POST   | `/invitations/<token>`          | Public: the invitee sets their own password                          |
 | POST   | `/login`                        | Sign in                                                      |

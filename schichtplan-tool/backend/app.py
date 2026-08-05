@@ -146,6 +146,30 @@ def employee_email(cursor, employee_id):
     return dict(row) if row else None
 
 
+def looks_like_email(value):
+    if not isinstance(value, str):
+        return False
+    local, at, domain = value.strip().partition('@')
+    return bool(local) and bool(at) and '.' in domain and not domain.startswith('.')
+
+
+def invitation_recipient(cursor, account):
+    """Where this account's invitation goes, and who to address it to.
+
+    An employee account takes the address from its roster entry, so it never
+    drifts from the record HR maintains; an HR account has no roster entry and
+    carries its own.
+    """
+    if account['role'] == EMPLOYEE_ROLE:
+        employee = employee_email(cursor, account['employee_id']) if account['employee_id'] else None
+        if employee and employee['email']:
+            return employee['email'], employee['name']
+        return None, None
+    if account['email']:
+        return account['email'], account['username']
+    return None, None
+
+
 @app.route('/register', methods=['POST'])
 def register():
     data = request.get_json(silent=True) or {}
@@ -175,28 +199,51 @@ def register():
         connection.close()
         return jsonify({'message': 'Unbekannte Rolle'}), 400
 
+    # Every account except the very first is created by somebody else, so it is
+    # invited: the person picks a password nobody else ever sees. The bootstrap
+    # account is the exception - there is no one to invite it, so it sets its
+    # own password on the spot.
+    invited = not first_account
+
     employee_id = data.get('employee_id') if role == EMPLOYEE_ROLE else None
-    recipient = None
+    account_email = (data.get('email') or '').strip() or None
+    recipient_email = None
+    recipient_name = None
+
     if role == EMPLOYEE_ROLE:
         # An employee account shows that person's own shifts, so it is useless
         # until it knows whose shifts those are.
         if employee_id is None:
             connection.close()
             return jsonify({'message': 'Ein Mitarbeiter-Konto muss mit einem Mitarbeiter verknüpft werden'}), 400
-        recipient = employee_email(cursor, employee_id)
-        if not recipient:
+        employee = employee_email(cursor, employee_id)
+        if not employee:
             connection.close()
             return jsonify({'message': 'Mitarbeiter nicht gefunden'}), 404
         # The invitation is the only way this account gets a password, so
         # without an address there is nowhere to send it.
-        if not recipient['email']:
+        if not employee['email']:
             connection.close()
             return jsonify({'message':
-                            f'{recipient["name"]} hat keine E-Mail-Adresse. '
+                            f'{employee["name"]} hat keine E-Mail-Adresse. '
                             'Bitte zuerst beim Mitarbeiter hinterlegen.'}), 400
+        # Taken from the roster entry rather than stored again on the account.
+        account_email = None
+        recipient_email, recipient_name = employee['email'], employee['name']
+    elif invited:
+        if not account_email:
+            connection.close()
+            return jsonify({'message': 'E-Mail-Adresse ist erforderlich, um die Einladung zu senden'}), 400
+        if not looks_like_email(account_email):
+            connection.close()
+            return jsonify({'message': 'Bitte eine gültige E-Mail-Adresse angeben'}), 400
+        recipient_email, recipient_name = account_email, username
     else:
-        # HR accounts still choose their password directly: they have no roster
-        # entry and therefore no address to invite.
+        # The bootstrap account. An address is optional here, but storing one
+        # means this account can later be re-invited if the password is lost.
+        if account_email and not looks_like_email(account_email):
+            connection.close()
+            return jsonify({'message': 'Bitte eine gültige E-Mail-Adresse angeben'}), 400
         if not password:
             connection.close()
             return jsonify({'message': 'Passwort ist erforderlich'}), 400
@@ -209,22 +256,23 @@ def register():
         connection.close()
         return jsonify({'message': 'Benutzername ist bereits vergeben'}), 400
 
-    # An empty hash marks an account that cannot be signed into yet. Employee
-    # accounts start that way so nobody, HR included, ever knows the password.
-    password_hash = '' if role == EMPLOYEE_ROLE else generate_password_hash(password)
+    # An empty hash marks an account that cannot be signed into yet. Invited
+    # accounts start that way, so nobody - the creator included - ever knows the
+    # password that ends up on them.
+    password_hash = '' if invited else generate_password_hash(password)
     cursor.execute(
-        'INSERT INTO users (username, hash, role, employee_id) VALUES (?, ?, ?, ?)',
-        (username, password_hash, role, employee_id),
+        'INSERT INTO users (username, hash, role, employee_id, email) VALUES (?, ?, ?, ?, ?)',
+        (username, password_hash, role, employee_id, account_email),
     )
     user_id = cursor.lastrowid
 
     invitation_sent = None
-    if role == EMPLOYEE_ROLE:
+    if invited:
         token = issue_invitation(cursor, user_id)
         connection.commit()
         connection.close()
         invitation_sent = mailer.send_invitation(
-            recipient['email'], username, token, INVITATION_VALID_DAYS)
+            recipient_email, username, token, INVITATION_VALID_DAYS)
     else:
         connection.commit()
         connection.close()
@@ -239,7 +287,7 @@ def register():
         'username': username,
         'role': role,
         'employee_id': employee_id,
-        'invitation_email': recipient['email'] if recipient else None,
+        'invitation_email': recipient_email,
         'invitation_sent': invitation_sent,
     }), 201
 
@@ -567,7 +615,10 @@ def list_accounts():
     cursor = connection.cursor()
     cursor.execute('''
         SELECT u.id, u.username, u.role, u.employee_id, u.created_at,
-               e.name AS employee_name, e.email AS employee_email,
+               e.name AS employee_name,
+               -- An employee's address lives on the roster entry, HR's on the
+               -- account itself; the UI just needs to know where mail would go.
+               COALESCE(e.email, u.email) AS contact_email,
                (u.hash != '') AS password_set,
                (i.id IS NOT NULL) AS invitation_pending
         FROM users u
@@ -591,18 +642,14 @@ def resend_invitation(account_id):
     """Send a fresh invitation, e.g. when the first one expired or went astray."""
     connection = get_db_connection()
     cursor = connection.cursor()
-    cursor.execute('SELECT id, username, role, employee_id, hash FROM users WHERE id = ?', (account_id,))
+    cursor.execute('SELECT id, username, role, employee_id, email, hash FROM users WHERE id = ?', (account_id,))
     account = cursor.fetchone()
     if not account:
         connection.close()
         return jsonify({'message': 'Konto nicht gefunden'}), 404
 
-    if account['role'] != EMPLOYEE_ROLE:
-        connection.close()
-        return jsonify({'message': 'Nur Mitarbeiter-Konten werden per E-Mail eingeladen'}), 400
-
-    recipient = employee_email(cursor, account['employee_id']) if account['employee_id'] else None
-    if not recipient or not recipient['email']:
+    recipient_email, _ = invitation_recipient(cursor, account)
+    if not recipient_email:
         connection.close()
         return jsonify({'message': 'Für dieses Konto ist keine E-Mail-Adresse hinterlegt'}), 400
 
@@ -613,10 +660,10 @@ def resend_invitation(account_id):
     connection.commit()
     connection.close()
 
-    sent = mailer.send_invitation(recipient['email'], account['username'], token, INVITATION_VALID_DAYS)
+    sent = mailer.send_invitation(recipient_email, account['username'], token, INVITATION_VALID_DAYS)
     return jsonify({
-        'message': f'Einladung an {recipient["email"]} gesendet' if sent
-                   else f'Einladung für {recipient["email"]} erstellt (kein SMTP konfiguriert - Link steht im Server-Log)',
+        'message': f'Einladung an {recipient_email} gesendet' if sent
+                   else f'Einladung für {recipient_email} erstellt (kein SMTP konfiguriert - Link steht im Server-Log)',
         'invitation_sent': sent,
     }), 200
 
