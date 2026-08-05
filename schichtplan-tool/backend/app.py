@@ -131,7 +131,12 @@ def register():
         return jsonify({'message': 'Unbekannte Rolle'}), 400
 
     employee_id = data.get('employee_id') if role == EMPLOYEE_ROLE else None
-    if employee_id is not None:
+    if role == EMPLOYEE_ROLE:
+        # An employee account shows that person's own shifts, so it is useless
+        # until it knows whose shifts those are.
+        if employee_id is None:
+            connection.close()
+            return jsonify({'message': 'Ein Mitarbeiter-Konto muss mit einem Mitarbeiter verknüpft werden'}), 400
         cursor.execute('SELECT id FROM employees WHERE id = ?', (employee_id,))
         if not cursor.fetchone():
             connection.close()
@@ -561,6 +566,12 @@ def fetch_schedule(year, month):
         connection.close()
         return None
 
+    cursor.execute(
+        'SELECT date, shift_type_id, start_time, end_time FROM shift_time_overrides WHERE schedule_id = ?',
+        (schedule['id'],),
+    )
+    overrides = {(r['date'], r['shift_type_id']): dict(r) for r in cursor.fetchall()}
+
     cursor.execute('''
         SELECT sa.id, sa.date, sa.shift_type_id, sa.slot_index, sa.employee_id, sa.manually_edited,
                st.name AS shift_type_name, st.color AS shift_type_color, st.start_time, st.end_time,
@@ -571,10 +582,19 @@ def fetch_schedule(year, month):
         WHERE sa.schedule_id = ?
         ORDER BY sa.date, st.start_time, sa.slot_index
     ''', (schedule['id'],))
+
     assignments = []
     for row in cursor.fetchall():
         a = dict(row)
         a['manually_edited'] = bool(a['manually_edited'])
+        # The shift type's hours are the default; a per-date override wins.
+        override = overrides.get((a['date'], a['shift_type_id']))
+        a['default_start_time'] = a['start_time']
+        a['default_end_time'] = a['end_time']
+        a['time_overridden'] = override is not None
+        if override:
+            a['start_time'] = override['start_time']
+            a['end_time'] = override['end_time']
         assignments.append(a)
 
     cursor.execute('SELECT id, name FROM employees WHERE active = 1 ORDER BY name')
@@ -689,10 +709,22 @@ def get_schedule(year, month):
     if not schedule:
         return jsonify({'message': 'Für diesen Monat wurde noch kein Plan generiert'}), 404
 
-    if not is_hr(g.user):
-        # Who works when is the point of the plan; how the workload compares
-        # across colleagues is a management view, so it stays with HR.
-        schedule.pop('distribution', None)
+    if is_hr(g.user):
+        schedule['scope'] = 'all'
+        return jsonify(schedule)
+
+    # An employee sees their own shifts and nothing else: not colleagues'
+    # shifts, not gaps in the plan, and not the workload comparison, which is
+    # a management view. Filtering happens here rather than in the browser so
+    # the rest is never sent in the first place.
+    linked_employee_id = g.user['employee_id']
+    schedule['assignments'] = [
+        a for a in schedule['assignments'] if a['employee_id'] == linked_employee_id
+    ]
+    schedule.pop('distribution', None)
+    schedule['scope'] = 'own'
+    schedule['unfilled_count'] = 0
+    schedule['linked_employee_id'] = linked_employee_id
 
     return jsonify(schedule)
 
@@ -711,6 +743,154 @@ def delete_schedule(year, month):
     connection.commit()
     connection.close()
     return jsonify({'message': 'Plan gelöscht'}), 200
+
+
+# ---------- day-level editing (times, extra places) ----------
+
+TIME_FORMAT_HINT = 'Zeiten müssen im Format HH:MM angegeben werden'
+
+
+def valid_time(value):
+    if not isinstance(value, str) or len(value) != 5 or value[2] != ':':
+        return False
+    hours, _, minutes = value.partition(':')
+    return (hours.isdigit() and minutes.isdigit()
+            and 0 <= int(hours) <= 23 and 0 <= int(minutes) <= 59)
+
+
+def find_schedule_id(cursor, year, month):
+    cursor.execute('SELECT id FROM schedules WHERE year = ? AND month = ?', (year, month))
+    row = cursor.fetchone()
+    return row['id'] if row else None
+
+
+@app.route('/schedules/<int:year>/<int:month>/shift-times', methods=['PUT'])
+@hr_required
+def set_shift_times(year, month):
+    """Change the hours a shift runs on one date only.
+
+    Sending null times clears the override, putting that date back on the shift
+    type's usual hours.
+    """
+    data = request.get_json(silent=True) or {}
+    iso_date = data.get('date')
+    shift_type_id = data.get('shift_type_id')
+    start_time = data.get('start_time')
+    end_time = data.get('end_time')
+
+    try:
+        date.fromisoformat(iso_date)
+    except (TypeError, ValueError):
+        return jsonify({'message': 'Ungültiges Datum'}), 400
+
+    connection = get_db_connection()
+    cursor = connection.cursor()
+
+    schedule_id = find_schedule_id(cursor, year, month)
+    if not schedule_id:
+        connection.close()
+        return jsonify({'message': 'Für diesen Monat wurde kein Plan gefunden'}), 404
+
+    cursor.execute('SELECT id FROM shift_types WHERE id = ?', (shift_type_id,))
+    if not cursor.fetchone():
+        connection.close()
+        return jsonify({'message': 'Schichtart nicht gefunden'}), 404
+
+    if start_time is None and end_time is None:
+        cursor.execute(
+            'DELETE FROM shift_time_overrides WHERE schedule_id = ? AND date = ? AND shift_type_id = ?',
+            (schedule_id, iso_date, shift_type_id),
+        )
+        connection.commit()
+        connection.close()
+        return jsonify({'message': 'Zeiten auf die Standardzeiten zurückgesetzt'}), 200
+
+    if not valid_time(start_time) or not valid_time(end_time):
+        connection.close()
+        return jsonify({'message': TIME_FORMAT_HINT}), 400
+
+    cursor.execute('''
+        INSERT INTO shift_time_overrides (schedule_id, date, shift_type_id, start_time, end_time)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(schedule_id, date, shift_type_id)
+        DO UPDATE SET start_time = excluded.start_time, end_time = excluded.end_time
+    ''', (schedule_id, iso_date, shift_type_id, start_time, end_time))
+
+    connection.commit()
+    connection.close()
+    return jsonify({'message': 'Zeiten für diesen Tag geändert'}), 200
+
+
+@app.route('/schedules/<int:year>/<int:month>/slots', methods=['POST'])
+@hr_required
+def add_slot(year, month):
+    """Add one more place to a shift on a single date, initially unassigned.
+
+    The shift type's required headcount stays as it is - this is a one-off
+    change to this date, not a change to what the shift normally needs.
+    """
+    data = request.get_json(silent=True) or {}
+    iso_date = data.get('date')
+    shift_type_id = data.get('shift_type_id')
+
+    try:
+        parsed = date.fromisoformat(iso_date)
+    except (TypeError, ValueError):
+        return jsonify({'message': 'Ungültiges Datum'}), 400
+    if (parsed.year, parsed.month) != (year, month):
+        return jsonify({'message': 'Das Datum liegt nicht in diesem Monat'}), 400
+
+    connection = get_db_connection()
+    cursor = connection.cursor()
+
+    schedule_id = find_schedule_id(cursor, year, month)
+    if not schedule_id:
+        connection.close()
+        return jsonify({'message': 'Für diesen Monat wurde kein Plan gefunden'}), 404
+
+    cursor.execute('SELECT id FROM shift_types WHERE id = ?', (shift_type_id,))
+    if not cursor.fetchone():
+        connection.close()
+        return jsonify({'message': 'Schichtart nicht gefunden'}), 404
+
+    cursor.execute(
+        'SELECT COALESCE(MAX(slot_index), -1) AS highest FROM shift_assignments '
+        'WHERE schedule_id = ? AND date = ? AND shift_type_id = ?',
+        (schedule_id, iso_date, shift_type_id),
+    )
+    next_index = cursor.fetchone()['highest'] + 1
+
+    cursor.execute(
+        'INSERT INTO shift_assignments (schedule_id, date, shift_type_id, slot_index, employee_id, manually_edited) '
+        'VALUES (?, ?, ?, ?, NULL, 1)',
+        (schedule_id, iso_date, shift_type_id, next_index),
+    )
+    assignment_id = cursor.lastrowid
+    refresh_unfilled_count(cursor, schedule_id)
+
+    connection.commit()
+    connection.close()
+    return jsonify({'id': assignment_id, 'message': 'Platz hinzugefügt'}), 201
+
+
+@app.route('/assignments/<int:assignment_id>', methods=['DELETE'])
+@hr_required
+def delete_assignment(assignment_id):
+    """Remove a place from a shift on one date."""
+    connection = get_db_connection()
+    cursor = connection.cursor()
+    cursor.execute('SELECT schedule_id FROM shift_assignments WHERE id = ?', (assignment_id,))
+    assignment = cursor.fetchone()
+    if not assignment:
+        connection.close()
+        return jsonify({'message': 'Zuweisung nicht gefunden'}), 404
+
+    cursor.execute('DELETE FROM shift_assignments WHERE id = ?', (assignment_id,))
+    refresh_unfilled_count(cursor, assignment['schedule_id'])
+
+    connection.commit()
+    connection.close()
+    return jsonify({'message': 'Platz entfernt'}), 200
 
 
 # ---------- manual editing (reassign / swap) ----------

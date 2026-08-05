@@ -13,20 +13,25 @@ function CalendarView({ schedule, shiftTypes, highlightEmployeeId }) {
     if (!byDate.has(a.date)) byDate.set(a.date, [])
     byDate.get(a.date).push(a)
   }
+  if (!schedule.year || !schedule.month) return null
 
-  const dates = [...byDate.keys()].sort()
-  if (dates.length === 0) return null
-
-  const first = new Date(dates[0] + 'T00:00:00')
-  const last = new Date(dates[dates.length - 1] + 'T00:00:00')
+  // Lay the grid out from the calendar month itself, not from the dates that
+  // happen to have shifts. An employee only sees the days they work, so driving
+  // the layout off the data would slide every date into the wrong weekday.
+  const { year, month } = schedule
+  const daysInMonth = new Date(year, month, 0).getDate()
+  const allDates = Array.from(
+    { length: daysInMonth },
+    (_, i) => `${year}-${String(month).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`
+  )
 
   // Pad so the first row starts on a Monday and the last row ends on a Sunday.
-  const leadingBlanks = (first.getDay() + 6) % 7
-  const trailingBlanks = 6 - ((last.getDay() + 6) % 7)
+  const leadingBlanks = (new Date(year, month - 1, 1).getDay() + 6) % 7
+  const trailingBlanks = 6 - ((new Date(year, month - 1, daysInMonth).getDay() + 6) % 7)
 
   const cells = [
     ...Array(leadingBlanks).fill(null),
-    ...dates,
+    ...allDates,
     ...Array(trailingBlanks).fill(null),
   ]
 
@@ -56,7 +61,7 @@ function CalendarView({ schedule, shiftTypes, highlightEmployeeId }) {
               return <div key={`blank-${dayIndex}`} className="calendar-day calendar-day-empty" />
             }
 
-            const dayAssignments = byDate.get(iso)
+            const dayAssignments = byDate.get(iso) || []
             const groups = new Map()
             for (const a of dayAssignments) {
               if (!groups.has(a.shift_type_id)) groups.set(a.shift_type_id, [])
@@ -80,7 +85,14 @@ function CalendarView({ schedule, shiftTypes, highlightEmployeeId }) {
                     <div className="calendar-shift-name">
                       <span className="badge-dot" style={{ backgroundColor: slots[0].shift_type_color }} />
                       {slots[0].shift_type_name}
-                      <span className="calendar-shift-time">{slots[0].start_time}</span>
+                      <span
+                        className={`calendar-shift-time ${slots[0].time_overridden ? 'calendar-shift-time-changed' : ''}`}
+                        title={slots[0].time_overridden
+                          ? `Nur an diesem Tag ${slots[0].start_time}–${slots[0].end_time} statt ${slots[0].default_start_time}–${slots[0].default_end_time}`
+                          : undefined}
+                      >
+                        {slots[0].start_time}–{slots[0].end_time}{slots[0].time_overridden ? ' *' : ''}
+                      </span>
                     </div>
                     <ul className="calendar-people">
                       {slots

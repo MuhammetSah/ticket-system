@@ -653,6 +653,90 @@ button.btn-small {
   color: var(--accent-hover);
 }
 
+/* Per-day shift cell editing */
+
+.shift-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 230px;
+}
+
+.cell-times {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.cell-times-overridden {
+  color: #b45309;
+}
+
+.cell-time-edit {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.cell-time-edit input[type="time"] {
+  width: auto;
+  padding: 0.2rem 0.35rem;
+  font-size: 0.78rem;
+}
+
+.cell-time-edit button {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.75rem;
+}
+
+.cell-icon {
+  padding: 0.1rem 0.3rem;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.cell-icon:hover {
+  background-color: rgba(13, 148, 136, 0.12);
+  color: var(--text-color);
+}
+
+.cell-icon-danger:hover {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+.cell-add {
+  align-self: flex-start;
+  margin-top: 0.1rem;
+  padding: 0.15rem 0.55rem;
+  background: none;
+  border: 1px dashed var(--border-color);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.cell-add:hover {
+  background-color: rgba(13, 148, 136, 0.08);
+  border-style: solid;
+  color: var(--text-color);
+}
+
+.calendar-shift-time-changed {
+  color: #b45309;
+  font-weight: 700;
+}
+
 /* Workload distribution */
 
 .distribution {

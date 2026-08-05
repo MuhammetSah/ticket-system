@@ -120,6 +120,22 @@ def init_db():
         )
     ''')
 
+    # Lets one date run a shift at different hours than the shift type says,
+    # e.g. the early shift finishing at 14:00 on Christmas Eve. Keyed per shift
+    # per date, so everyone on that shift that day shares the changed hours.
+    # Deliberately survives regeneration: hours HR set for a date should stick.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS shift_time_overrides(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            schedule_id INTEGER NOT NULL REFERENCES schedules(id) ON DELETE CASCADE,
+            date TEXT NOT NULL,
+            shift_type_id INTEGER NOT NULL REFERENCES shift_types(id) ON DELETE CASCADE,
+            start_time TEXT NOT NULL,
+            end_time TEXT NOT NULL,
+            UNIQUE(schedule_id, date, shift_type_id)
+        )
+    ''')
+
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS shift_assignments(
             id INTEGER PRIMARY KEY AUTOINCREMENT,

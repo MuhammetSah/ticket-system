@@ -10,10 +10,10 @@ Industry-independent shift planning for HR: define employees with constraints (e
 
 Two kinds of account:
 
-- **Personalabteilung (HR)** – creates, edits and deletes everything: employees, shift types, generated plans, and accounts.
-- **Mitarbeiter (employee)** – read-only. Sees the published schedule and nothing else; every write is refused by the API, not just hidden in the UI.
+- **Personalabteilung (HR)** – creates, edits and deletes everything: employees, shift types, generated plans, and accounts. Sees the whole plan.
+- **Mitarbeiter (employee)** – read-only, and only their *own* shifts. Colleagues' shifts, gaps in the plan and the workload comparison are never sent to them at all. Every write is refused by the API, not just hidden in the UI.
 
-Being scheduled does not require an account — an employee only needs one if they should be able to look the plan up themselves. An employee account can optionally be linked to its roster entry, which highlights that person's own shifts in the calendar.
+Being scheduled does not require an account — an employee only needs one if they should be able to look their own shifts up. Each employee account is linked to its roster entry, which is what makes "own shifts" meaningful, so the link is required when the account is created.
 
 ## Scope
 
@@ -29,6 +29,7 @@ Being scheduled does not require an account — an employee only needs one if th
 - **Authentication and roles** – session-based login with hashed passwords (Werkzeug). Every route that touches staff data requires a session, and every route that *changes* anything requires the HR role. Registration is open only until the first account exists — a fresh install sends you straight to setup; afterwards only HR can create accounts, so nobody can sign themselves up and read the roster
 - **Two views of the plan** – a **calendar** laid out like a wall planner (one column per weekday, one row per week, each day listing its shifts and everyone working them), and a **table** for editing. HR gets both; employees get both read-only
 - **Several people per shift** – each shift type carries a required headcount *per weekday*, so a weekday can need 2 on the early shift and 3 on the late one while a Sunday needs 1 of each. The scheduler fills each of those places separately and the calendar lists everyone assigned
+- **Day-level changes** – beyond the shift type's usual hours (e.g. 08:00–16:30), HR can change what a shift runs on one single date without touching any other day, and can add or remove a place on a given day. Changed hours are marked with `*` in both views and can be reset to the shift type's default in one click
 - **Employee management** – name, optional email, optional monthly shift cap, recurring weekday unavailability (e.g. no Wednesdays), one-off unavailable dates (vacation/sick leave), and an optional allow-list restricting an employee to specific shift types (e.g. "only early shift")
 - **Shift type management** – name, start/end time, color, and required headcount per weekday (weekday and weekend staffing needs are often different)
 - **Automatic monthly schedule generation** via backtracking search
@@ -220,6 +221,9 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 | POST   | `/schedules/generate`            | Generate (or regenerate) a month's schedule `{year, month}`      |
 | GET    | `/schedules/<year>/<month>`      | Get a month's schedule, its assignments, and the workload distribution |
 | DELETE | `/schedules/<year>/<month>`      | Delete a month's schedule                                           |
+| PUT    | `/schedules/<year>/<month>/shift-times` | Change a shift's hours on one date; null times reset it to the shift type's |
+| POST   | `/schedules/<year>/<month>/slots` | Add one more place to a shift on a single date                      |
+| DELETE | `/assignments/<id>`               | Remove a place from a shift on one date                              |
 | PUT    | `/assignments/<id>`               | Reassign one shift slot to a different employee (or `null`)          |
 | POST   | `/assignments/swap`               | Swap the employees on two shift assignments `{assignment_id_a, assignment_id_b}` |
 

@@ -126,6 +126,41 @@ function SchedulePage({ setFlash, user }) {
     }
   }
 
+  async function setTimes(date, shiftTypeId, startTime, endTime) {
+    try {
+      const result = await api.put(`/schedules/${year}/${month}/shift-times`, {
+        date,
+        shift_type_id: shiftTypeId,
+        start_time: startTime,
+        end_time: endTime,
+      })
+      await refreshSchedule()
+      setFlash({ type: 'success', text: result.message })
+    } catch (err) {
+      setFlash({ type: 'error', text: err.message })
+    }
+  }
+
+  async function addSlot(date, shiftTypeId) {
+    try {
+      await api.post(`/schedules/${year}/${month}/slots`, { date, shift_type_id: shiftTypeId })
+      await refreshSchedule()
+      setFlash({ type: 'success', text: 'Platz hinzugefügt - jetzt jemanden zuweisen.' })
+    } catch (err) {
+      setFlash({ type: 'error', text: err.message })
+    }
+  }
+
+  async function removeSlot(assignmentId) {
+    try {
+      await api.delete(`/assignments/${assignmentId}`)
+      await refreshSchedule()
+      setFlash({ type: 'success', text: 'Platz entfernt.' })
+    } catch (err) {
+      setFlash({ type: 'error', text: err.message })
+    }
+  }
+
   function toggleSwapSelect(assignmentId) {
     if (swapSelection === assignmentId) {
       setSwapSelection(null)
@@ -188,11 +223,17 @@ function SchedulePage({ setFlash, user }) {
       {!loading && schedule && (
         <>
           <div className="schedule-summary">
-            <span className="badge">{schedule.assignments.length} Schichten insgesamt</span>
-            {schedule.unfilled_count > 0 ? (
-              <span className="badge badge-inactive">{schedule.unfilled_count} unbesetzt</span>
-            ) : (
-              <span className="badge">Vollständig besetzt</span>
+            <span className="badge">
+              {schedule.scope === 'own'
+                ? `${schedule.assignments.length} eigene Schichten`
+                : `${schedule.assignments.length} Schichten insgesamt`}
+            </span>
+            {schedule.scope !== 'own' && (
+              schedule.unfilled_count > 0 ? (
+                <span className="badge badge-inactive">{schedule.unfilled_count} unbesetzt</span>
+              ) : (
+                <span className="badge">Vollständig besetzt</span>
+              )
             )}
             {schedule.distribution && (
               <>
@@ -211,10 +252,15 @@ function SchedulePage({ setFlash, user }) {
             </div>
           )}
 
+          {schedule.scope === 'own' && (
+            <p className="hint">Ihre eigenen Schichten in {MONTH_NAMES[month - 1]} {year}.</p>
+          )}
+
           {view === 'table' && canEdit && (
             <p className="hint">
-              Mitarbeiter über die Auswahlfelder direkt umbesetzen, oder zwei Schichten mit ⇄ zum Tauschen auswählen
-              {swapSelection && ' (1 Schicht ausgewählt - jetzt eine zweite anklicken)'}.
+              Umbesetzen über die Auswahlfelder, ⇄ tauscht zwei Schichten, ✎ ändert die Zeiten nur an diesem Tag,
+              „+ Platz“ und ✕ fügen an einem Tag eine Besetzung hinzu oder entfernen sie
+              {swapSelection && ' — 1 Schicht ausgewählt, jetzt eine zweite anklicken'}.
             </p>
           )}
 
@@ -235,6 +281,9 @@ function SchedulePage({ setFlash, user }) {
               onReassign={reassign}
               swapSelection={swapSelection}
               onToggleSwap={toggleSwapSelect}
+              onSetTimes={setTimes}
+              onAddSlot={addSlot}
+              onRemoveSlot={removeSlot}
             />
           )}
         </>
