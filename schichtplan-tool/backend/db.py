@@ -17,16 +17,31 @@ def init_db():
     connection = get_db_connection()
     cursor = connection.cursor()
 
-    # HR staff who may use the tool. Employees being scheduled are *not* users -
-    # they never log in, which is why the two live in separate tables.
+    # Accounts that can sign in. Two roles:
+    #   'hr'       - full access: manages employees, shift types and schedules
+    #   'employee' - read-only: may look at the published schedule, nothing else
+    # Being scheduled does not require an account, so the employees table stays
+    # separate; employee_id optionally links an account to its roster entry so
+    # the calendar can highlight that person's own shifts.
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT NOT NULL UNIQUE,
             hash TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'hr',
+            employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+
+    # Databases created before roles existed only have the original columns.
+    cursor.execute('PRAGMA table_info(users)')
+    user_columns = {row['name'] for row in cursor.fetchall()}
+    if 'role' not in user_columns:
+        # Existing accounts predate the split and were all full-access.
+        cursor.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'hr'")
+    if 'employee_id' not in user_columns:
+        cursor.execute('ALTER TABLE users ADD COLUMN employee_id INTEGER REFERENCES employees(id)')
 
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS employees(

@@ -506,6 +506,153 @@ button.btn-small {
   color: #fff;
 }
 
+/* Calendar view */
+
+.view-toggle {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.2rem;
+  background-color: var(--bg-color);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+}
+
+.view-toggle button {
+  padding: 0.35rem 0.9rem;
+  background: none;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  border-radius: 999px;
+}
+
+.view-toggle button:hover {
+  background-color: rgba(13, 148, 136, 0.08);
+  color: var(--text-color);
+}
+
+.view-toggle button.active {
+  background-color: var(--accent);
+  color: #ffffff;
+}
+
+.calendar {
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  overflow: hidden;
+  min-width: 700px;
+}
+
+.calendar-wrap {
+  overflow-x: auto;
+}
+
+.calendar-head,
+.calendar-week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.calendar-head-cell {
+  padding: 0.55rem 0.6rem;
+  background-color: var(--bg-color);
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.calendar-day {
+  min-height: 116px;
+  padding: 0.5rem 0.55rem 0.65rem;
+  border-right: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+  background-color: var(--surface-color);
+}
+
+.calendar-day:nth-child(7n) {
+  border-right: none;
+}
+
+.calendar-week:last-child .calendar-day {
+  border-bottom: none;
+}
+
+.calendar-day-weekend {
+  background-color: rgba(94, 234, 212, 0.07);
+}
+
+.calendar-day-empty {
+  background-color: var(--bg-color);
+}
+
+.calendar-day-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.4rem;
+}
+
+.calendar-day-number {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.calendar-gap-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background-color: #f59e0b;
+}
+
+.calendar-shift + .calendar-shift {
+  margin-top: 0.45rem;
+}
+
+.calendar-shift-name {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.calendar-shift-time {
+  margin-left: auto;
+  font-weight: 500;
+  opacity: 0.8;
+}
+
+.calendar-people {
+  list-style: none;
+  margin-top: 0.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.calendar-person {
+  font-size: 0.78rem;
+  line-height: 1.35;
+  padding-left: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-person-unfilled {
+  color: #b45309;
+  font-style: italic;
+}
+
+.calendar-person-me {
+  font-weight: 700;
+  color: var(--accent-hover);
+}
+
 /* Workload distribution */
 
 .distribution {

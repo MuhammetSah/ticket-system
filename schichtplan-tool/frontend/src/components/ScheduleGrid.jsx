@@ -11,7 +11,7 @@ function isWeekend(iso) {
   return day === 0 || day === 6
 }
 
-function ScheduleGrid({ schedule, employees, shiftTypes, onReassign, swapSelection, onToggleSwap }) {
+function ScheduleGrid({ schedule, employees, shiftTypes, readOnly = false, onReassign, swapSelection, onToggleSwap }) {
   const byDate = new Map()
   for (const a of schedule.assignments) {
     if (!byDate.has(a.date)) byDate.set(a.date, new Map())
@@ -52,20 +52,28 @@ function ScheduleGrid({ schedule, employees, shiftTypes, onReassign, swapSelecti
                           key={slot.id}
                           className={`slot-cell ${slot.employee_id ? '' : 'unfilled'} ${swapSelection === slot.id ? 'swap-selected' : ''}`}
                         >
-                          <select value={slot.employee_id ?? ''} onChange={e => onReassign(slot.id, e.target.value)}>
-                            <option value="">— unbesetzt —</option>
-                            {employeeOptions(slot.employee_id).map(e => (
-                              <option key={e.id} value={e.id}>{e.name}</option>
-                            ))}
-                          </select>
-                          <button
-                            type="button"
-                            className={`swap-toggle ${swapSelection === slot.id ? 'active' : ''}`}
-                            title="Für Tausch auswählen"
-                            onClick={() => onToggleSwap(slot.id)}
-                          >
-                            ⇄
-                          </button>
+                          {readOnly ? (
+                            <span className={slot.employee_id ? '' : 'calendar-person-unfilled'}>
+                              {slot.employee_name || 'unbesetzt'}
+                            </span>
+                          ) : (
+                            <>
+                              <select value={slot.employee_id ?? ''} onChange={e => onReassign(slot.id, e.target.value)}>
+                                <option value="">— unbesetzt —</option>
+                                {employeeOptions(slot.employee_id).map(e => (
+                                  <option key={e.id} value={e.id}>{e.name}</option>
+                                ))}
+                              </select>
+                              <button
+                                type="button"
+                                className={`swap-toggle ${swapSelection === slot.id ? 'active' : ''}`}
+                                title="Für Tausch auswählen"
+                                onClick={() => onToggleSwap(slot.id)}
+                              >
+                                ⇄
+                              </button>
+                            </>
+                          )}
                         </div>
                       ))
                     )}

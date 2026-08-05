@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api'
 
@@ -10,19 +10,40 @@ import { api } from '../api'
 function Register({ isSetup, currentUser, onLoggedIn, setFlash }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [role, setRole] = useState('employee')
+  const [employeeId, setEmployeeId] = useState('')
+  const [employees, setEmployees] = useState([])
   const [busy, setBusy] = useState(false)
   const navigate = useNavigate()
+
+  // Only HR can link a new read-only account to a roster entry.
+  useEffect(() => {
+    if (!currentUser) return
+    let cancelled = false
+    api.get('/employees')
+      .then(list => { if (!cancelled) setEmployees(list) })
+      .catch(() => { /* the link is optional, so a failure here is not fatal */ })
+    return () => { cancelled = true }
+  }, [currentUser])
 
   async function handleSubmit(e) {
     e.preventDefault()
     setBusy(true)
     try {
-      const user = await api.post('/register', { username, password })
+      const payload = { username, password }
+      if (currentUser) {
+        payload.role = role
+        if (role === 'employee' && employeeId) {
+          payload.employee_id = Number(employeeId)
+        }
+      }
+      const user = await api.post('/register', payload)
       if (currentUser) {
         // An existing user stays signed in as themselves after adding someone.
         setFlash({ type: 'success', text: `Konto für ${user.username} angelegt.` })
         setUsername('')
         setPassword('')
+        setEmployeeId('')
       } else {
         onLoggedIn(user)
         setFlash({ type: 'success', text: `Konto angelegt. Willkommen, ${user.username}.` })
@@ -40,8 +61,8 @@ function Register({ isSetup, currentUser, onLoggedIn, setFlash }) {
       <h2>{currentUser ? 'Kollegin oder Kollegen hinzufügen' : 'Erstes Konto einrichten'}</h2>
       <p className="hint">
         {currentUser
-          ? 'Das neue Konto hat dieselben Rechte wie Ihres.'
-          : 'Dieses Konto erhält Zugriff auf alle Mitarbeiter- und Planungsdaten. Weitere Konten kann danach nur ein angemeldeter Benutzer anlegen.'}
+          ? 'Personal-Konten dürfen alles bearbeiten. Mitarbeiter-Konten können den Dienstplan nur ansehen.'
+          : 'Dieses Konto erhält Zugriff auf alle Mitarbeiter- und Planungsdaten. Weitere Konten kann danach nur die Personalabteilung anlegen.'}
       </p>
       <form onSubmit={handleSubmit}>
         <div className="field">
@@ -67,6 +88,29 @@ function Register({ isSetup, currentUser, onLoggedIn, setFlash }) {
           />
           <p className="hint">Mindestens 8 Zeichen.</p>
         </div>
+        {currentUser && (
+          <>
+            <div className="field">
+              <label htmlFor="register-role">Rolle</label>
+              <select id="register-role" value={role} onChange={e => setRole(e.target.value)}>
+                <option value="employee">Mitarbeiter — darf den Dienstplan nur ansehen</option>
+                <option value="hr">Personalabteilung — darf alles bearbeiten</option>
+              </select>
+            </div>
+            {role === 'employee' && (
+              <div className="field">
+                <label htmlFor="register-employee">Mit Mitarbeiter verknüpfen (optional)</label>
+                <select id="register-employee" value={employeeId} onChange={e => setEmployeeId(e.target.value)}>
+                  <option value="">— keine Verknüpfung —</option>
+                  {employees.map(emp => (
+                    <option key={emp.id} value={emp.id}>{emp.name}</option>
+                  ))}
+                </select>
+                <p className="hint">Eigene Schichten werden im Kalender hervorgehoben.</p>
+              </div>
+            )}
+          </>
+        )}
         <button type="submit" disabled={busy}>
           {busy ? 'Speichern …' : (currentUser ? 'Konto anlegen' : 'Konto einrichten')}
         </button>

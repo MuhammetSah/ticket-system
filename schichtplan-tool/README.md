@@ -8,12 +8,17 @@ This is a standalone project living alongside the Support Ticket System in this 
 
 Industry-independent shift planning for HR: define employees with constraints (e.g. "never works Wednesdays", "only early shift"), define shift types with per-weekday staffing needs, then generate a month's schedule automatically.
 
-Employees have no accounts and never log in — they are records, not users. HR staff *do* sign in, because the tool holds personal data (names, emails, booked time off) that should not be readable by anyone who finds the URL.
+Two kinds of account:
+
+- **Personalabteilung (HR)** – creates, edits and deletes everything: employees, shift types, generated plans, and accounts.
+- **Mitarbeiter (employee)** – read-only. Sees the published schedule and nothing else; every write is refused by the API, not just hidden in the UI.
+
+Being scheduled does not require an account — an employee only needs one if they should be able to look the plan up themselves. An employee account can optionally be linked to its roster entry, which highlights that person's own shifts in the calendar.
 
 ## Scope
 
-- **No employee login** – pure HR tool; employees are scheduled, they do not use it
-- **HR sign-in** – the first visit sets up an account; after that everything is behind a login
+- **Role-based access** – HR manages everything; employees get a read-only view of the plan
+- **Sign-in required** – the first visit sets up the HR account; after that everything is behind a login
 - **Monthly plans** – one schedule per calendar month
 - **Backtracking scheduling algorithm** – not greedy (see below)
 - **Manual post-editing by HR** – reassign any slot, or swap two shifts between employees
@@ -21,7 +26,9 @@ Employees have no accounts and never log in — they are records, not users. HR 
 
 ## Features
 
-- **HR authentication** – session-based login with hashed passwords (Werkzeug). Every route that touches staff data requires a session. Registration is open only until the first account exists — a fresh install sends you straight to setup; afterwards new colleagues can only be added by someone already signed in, so nobody can sign themselves up and read the roster
+- **Authentication and roles** – session-based login with hashed passwords (Werkzeug). Every route that touches staff data requires a session, and every route that *changes* anything requires the HR role. Registration is open only until the first account exists — a fresh install sends you straight to setup; afterwards only HR can create accounts, so nobody can sign themselves up and read the roster
+- **Two views of the plan** – a **calendar** laid out like a wall planner (one column per weekday, one row per week, each day listing its shifts and everyone working them), and a **table** for editing. HR gets both; employees get both read-only
+- **Several people per shift** – each shift type carries a required headcount *per weekday*, so a weekday can need 2 on the early shift and 3 on the late one while a Sunday needs 1 of each. The scheduler fills each of those places separately and the calendar lists everyone assigned
 - **Employee management** – name, optional email, optional monthly shift cap, recurring weekday unavailability (e.g. no Wednesdays), one-off unavailable dates (vacation/sick leave), and an optional allow-list restricting an employee to specific shift types (e.g. "only early shift")
 - **Shift type management** – name, start/end time, color, and required headcount per weekday (weekday and weekend staffing needs are often different)
 - **Automatic monthly schedule generation** via backtracking search
@@ -193,11 +200,11 @@ VITE_API_URL=http://localhost:5001
 
 ## API Endpoints
 
-Everything except `/`, `/register`, `/login` and `/me` requires a signed-in session and answers `401` without one.
+Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session (`401` without one). Everything that changes data also needs the HR role (`403` for an employee account).
 
 | Method | Route                          | Description                                              |
 |--------|----------------------------------|------------------------------------------------------------|
-| POST   | `/register`                     | Create the first account, or (when signed in) add a colleague |
+| POST   | `/register`                     | Create the first HR account, or (as HR) add an account with a role |
 | POST   | `/login`                        | Sign in                                                      |
 | POST   | `/logout`                       | Sign out                                                      |
 | GET    | `/me`                           | Current user, or `401` with `setup_required` on a fresh install |

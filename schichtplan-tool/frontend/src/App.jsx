@@ -9,7 +9,7 @@ import Flash from './Flash'
 import { api, UnauthorizedError } from './api'
 import './App.css'
 
-function RequireAuth({ user, setupRequired, children }) {
+function RequireAuth({ user, setupRequired, hrOnly = false, children }) {
   const location = useLocation()
   if (!user) {
     // On a brand new install there is nobody to log in as yet, so send the
@@ -21,6 +21,10 @@ function RequireAuth({ user, setupRequired, children }) {
         state={{ from: location.pathname }}
       />
     )
+  }
+  // Employee accounts only get the schedule; the API refuses the rest anyway.
+  if (hrOnly && user.role !== 'hr') {
+    return <Navigate to="/" replace />
   }
   return children
 }
@@ -55,6 +59,8 @@ function App() {
     return () => { cancelled = true }
   }, [])
 
+  const isHr = user?.role === 'hr'
+
   function handleLoggedIn(loggedInUser) {
     setUser(loggedInUser)
     setSetupRequired(false)
@@ -80,9 +86,13 @@ function App() {
             {user ? (
               <>
                 <NavLink to="/" end className={({ isActive }) => isActive ? 'active' : ''}>Dienstplan</NavLink>
-                <NavLink to="/employees" className={({ isActive }) => isActive ? 'active' : ''}>Mitarbeiter</NavLink>
-                <NavLink to="/shift-types" className={({ isActive }) => isActive ? 'active' : ''}>Schichtarten</NavLink>
-                <NavLink to="/register" className={({ isActive }) => isActive ? 'active' : ''}>Konten</NavLink>
+                {isHr && (
+                  <>
+                    <NavLink to="/employees" className={({ isActive }) => isActive ? 'active' : ''}>Mitarbeiter</NavLink>
+                    <NavLink to="/shift-types" className={({ isActive }) => isActive ? 'active' : ''}>Schichtarten</NavLink>
+                    <NavLink to="/register" className={({ isActive }) => isActive ? 'active' : ''}>Konten</NavLink>
+                  </>
+                )}
                 <button onClick={handleLogout}>Abmelden ({user.username})</button>
               </>
             ) : (
@@ -99,13 +109,19 @@ function App() {
           ) : (
             <Routes>
               <Route path="/" element={
-                <RequireAuth user={user} setupRequired={setupRequired}><SchedulePage setFlash={setFlash} /></RequireAuth>
+                <RequireAuth user={user} setupRequired={setupRequired}>
+                  <SchedulePage setFlash={setFlash} user={user} />
+                </RequireAuth>
               } />
               <Route path="/employees" element={
-                <RequireAuth user={user} setupRequired={setupRequired}><Employees setFlash={setFlash} /></RequireAuth>
+                <RequireAuth user={user} setupRequired={setupRequired} hrOnly>
+                  <Employees setFlash={setFlash} />
+                </RequireAuth>
               } />
               <Route path="/shift-types" element={
-                <RequireAuth user={user} setupRequired={setupRequired}><ShiftTypes setFlash={setFlash} /></RequireAuth>
+                <RequireAuth user={user} setupRequired={setupRequired} hrOnly>
+                  <ShiftTypes setFlash={setFlash} />
+                </RequireAuth>
               } />
               <Route path="/login" element={
                 user ? <Navigate to="/" replace />
@@ -113,17 +129,19 @@ function App() {
               } />
               <Route path="/register" element={
                 // Open to everyone only while no account exists yet; afterwards
-                // it is how a signed-in user adds a colleague.
-                (user || setupRequired)
-                  ? <Register isSetup={setupRequired} currentUser={user} onLoggedIn={handleLoggedIn} setFlash={setFlash} />
-                  : <Navigate to="/login" replace />
+                // it is how HR adds a colleague.
+                setupRequired
+                  ? <Register isSetup currentUser={null} onLoggedIn={handleLoggedIn} setFlash={setFlash} />
+                  : isHr
+                    ? <Register isSetup={false} currentUser={user} onLoggedIn={handleLoggedIn} setFlash={setFlash} />
+                    : <Navigate to={user ? '/' : '/login'} replace />
               } />
               <Route path="*" element={<Navigate to={user ? '/' : (setupRequired ? '/register' : '/login')} replace />} />
             </Routes>
           )}
         </main>
         <footer className="footer">
-          <p>2026 Muhammet Sahin. Schichtplan-Tool — internes HR-Werkzeug, kein Mitarbeiter-Login.</p>
+          <p>2026 Muhammet Sahin. Schichtplan-Tool — Planung durch die Personalabteilung, Einsicht für Mitarbeiter.</p>
         </footer>
       </div>
     </BrowserRouter>

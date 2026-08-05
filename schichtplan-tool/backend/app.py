@@ -2,7 +2,7 @@ import os
 from datetime import date
 from functools import wraps
 
-from flask import Flask, jsonify, request, session
+from flask import Flask, g, jsonify, request, session
 from flask_cors import CORS
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -35,21 +35,60 @@ init_db()
 
 # ---------- authentication ----------
 
+HR_ROLE = 'hr'
+EMPLOYEE_ROLE = 'employee'
+
+
 def current_user_id():
     return session.get('user_id')
 
 
-def login_required(view):
-    """Every route that touches staff data sits behind this.
+def load_current_user():
+    """The signed-in account, or None. Read fresh so a role change takes effect."""
+    user_id = current_user_id()
+    if not user_id:
+        return None
 
-    Employees never log in - this guards the HR side of the tool, which is the
-    only side there is. Without it the whole roster, including names, emails and
-    booked time off, is readable by anyone who can reach the API.
+    connection = get_db_connection()
+    cursor = connection.cursor()
+    cursor.execute('SELECT id, username, role, employee_id FROM users WHERE id = ?', (user_id,))
+    user = cursor.fetchone()
+    connection.close()
+    return dict(user) if user else None
+
+
+def is_hr(user):
+    return bool(user) and user['role'] == HR_ROLE
+
+
+def login_required(view):
+    """Any signed-in account may pass: HR, or an employee reading the plan."""
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        user = load_current_user()
+        if not user:
+            return jsonify({'message': 'Nicht angemeldet'}), 401
+        g.user = user
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
+def hr_required(view):
+    """Anything that changes data is HR-only.
+
+    Employee accounts are strictly read-only: they may look at the published
+    schedule and nothing else. Enforced here rather than only by hiding buttons,
+    because hidden buttons stop nobody from calling the API directly.
     """
     @wraps(view)
     def wrapped(*args, **kwargs):
-        if not current_user_id():
+        user = load_current_user()
+        if not user:
             return jsonify({'message': 'Nicht angemeldet'}), 401
+        if not is_hr(user):
+            return jsonify({'message': 'Nur die Personalabteilung darf das ändern'}), 403
+        g.user = user
         return view(*args, **kwargs)
 
     return wrapped
@@ -74,12 +113,29 @@ def register():
     connection = get_db_connection()
     cursor = connection.cursor()
 
-    # The first account sets the tool up; after that, only someone already logged
-    # in may add colleagues. Otherwise anyone finding the URL could sign
-    # themselves up and read the entire roster.
-    if count_users(cursor) > 0 and not current_user_id():
+    first_account = count_users(cursor) == 0
+    creator = load_current_user()
+
+    # The first account sets the tool up and is always HR - someone has to be
+    # able to administer it. After that only HR may create accounts, so nobody
+    # can sign themselves up and read the roster.
+    if not first_account and not is_hr(creator):
         connection.close()
-        return jsonify({'message': 'Neue Konten kann nur ein angemeldeter Benutzer anlegen'}), 403
+        message = ('Nur die Personalabteilung darf Konten anlegen' if creator
+                   else 'Neue Konten kann nur ein angemeldeter Benutzer anlegen')
+        return jsonify({'message': message}), 403
+
+    role = HR_ROLE if first_account else (data.get('role') or HR_ROLE)
+    if role not in (HR_ROLE, EMPLOYEE_ROLE):
+        connection.close()
+        return jsonify({'message': 'Unbekannte Rolle'}), 400
+
+    employee_id = data.get('employee_id') if role == EMPLOYEE_ROLE else None
+    if employee_id is not None:
+        cursor.execute('SELECT id FROM employees WHERE id = ?', (employee_id,))
+        if not cursor.fetchone():
+            connection.close()
+            return jsonify({'message': 'Mitarbeiter nicht gefunden'}), 404
 
     cursor.execute('SELECT id FROM users WHERE username = ?', (username,))
     if cursor.fetchone():
@@ -87,19 +143,19 @@ def register():
         return jsonify({'message': 'Benutzername ist bereits vergeben'}), 400
 
     cursor.execute(
-        'INSERT INTO users (username, hash) VALUES (?, ?)',
-        (username, generate_password_hash(password)),
+        'INSERT INTO users (username, hash, role, employee_id) VALUES (?, ?, ?, ?)',
+        (username, generate_password_hash(password), role, employee_id),
     )
     user_id = cursor.lastrowid
     connection.commit()
     connection.close()
 
-    # Signing in the very first user saves them an immediate second step; an
-    # existing user adding a colleague must stay logged in as themselves.
-    if not current_user_id():
+    # Signing in the very first user saves them an immediate second step; HR
+    # adding a colleague must stay logged in as themselves.
+    if first_account:
         session['user_id'] = user_id
 
-    return jsonify({'id': user_id, 'username': username}), 201
+    return jsonify({'id': user_id, 'username': username, 'role': role, 'employee_id': employee_id}), 201
 
 
 @app.route('/login', methods=['POST'])
@@ -121,7 +177,12 @@ def login():
 
     session.clear()
     session['user_id'] = user['id']
-    return jsonify({'id': user['id'], 'username': user['username']}), 200
+    return jsonify({
+        'id': user['id'],
+        'username': user['username'],
+        'role': user['role'],
+        'employee_id': user['employee_id'],
+    }), 200
 
 
 @app.route('/logout', methods=['POST'])
@@ -144,7 +205,7 @@ def me():
         connection.close()
         return jsonify({'message': 'Nicht angemeldet', 'setup_required': setup_required}), 401
 
-    cursor.execute('SELECT id, username FROM users WHERE id = ?', (user_id,))
+    cursor.execute('SELECT id, username, role, employee_id FROM users WHERE id = ?', (user_id,))
     user = cursor.fetchone()
     connection.close()
 
@@ -153,7 +214,13 @@ def me():
         session.clear()
         return jsonify({'message': 'Nicht angemeldet', 'setup_required': setup_required}), 401
 
-    return jsonify({'id': user['id'], 'username': user['username'], 'setup_required': False}), 200
+    return jsonify({
+        'id': user['id'],
+        'username': user['username'],
+        'role': user['role'],
+        'employee_id': user['employee_id'],
+        'setup_required': False,
+    }), 200
 
 
 # ---------- serialization helpers ----------
@@ -250,13 +317,24 @@ def list_employees():
     connection = get_db_connection()
     cursor = connection.cursor()
     cursor.execute('SELECT * FROM employees ORDER BY name')
-    employees = [serialize_employee(cursor, row) for row in cursor.fetchall()]
+    rows = cursor.fetchall()
+
+    if is_hr(g.user):
+        employees = [serialize_employee(cursor, row) for row in rows]
+    else:
+        # An employee needs colleagues' names to read the plan, but not their
+        # email addresses, booked time off or contracted hours.
+        employees = [
+            {'id': row['id'], 'name': row['name'], 'active': bool(row['active'])}
+            for row in rows
+        ]
+
     connection.close()
     return jsonify(employees)
 
 
 @app.route('/employees', methods=['POST'])
-@login_required
+@hr_required
 def create_employee():
     data = request.get_json(silent=True) or {}
     name = (data.get('name') or '').strip()
@@ -283,7 +361,7 @@ def create_employee():
 
 
 @app.route('/employees/<int:employee_id>', methods=['GET'])
-@login_required
+@hr_required
 def get_employee(employee_id):
     connection = get_db_connection()
     cursor = connection.cursor()
@@ -298,7 +376,7 @@ def get_employee(employee_id):
 
 
 @app.route('/employees/<int:employee_id>', methods=['PUT'])
-@login_required
+@hr_required
 def update_employee(employee_id):
     data = request.get_json(silent=True) or {}
     connection = get_db_connection()
@@ -330,7 +408,7 @@ def update_employee(employee_id):
 
 
 @app.route('/employees/<int:employee_id>', methods=['DELETE'])
-@login_required
+@hr_required
 def delete_employee(employee_id):
     connection = get_db_connection()
     cursor = connection.cursor()
@@ -358,7 +436,7 @@ def list_shift_types():
 
 
 @app.route('/shift-types', methods=['POST'])
-@login_required
+@hr_required
 def create_shift_type():
     data = request.get_json(silent=True) or {}
     name = (data.get('name') or '').strip()
@@ -387,7 +465,7 @@ def create_shift_type():
 
 
 @app.route('/shift-types/<int:shift_type_id>', methods=['PUT'])
-@login_required
+@hr_required
 def update_shift_type(shift_type_id):
     data = request.get_json(silent=True) or {}
     connection = get_db_connection()
@@ -421,7 +499,7 @@ def update_shift_type(shift_type_id):
 
 
 @app.route('/shift-types/<int:shift_type_id>', methods=['DELETE'])
-@login_required
+@hr_required
 def delete_shift_type(shift_type_id):
     connection = get_db_connection()
     cursor = connection.cursor()
@@ -550,7 +628,7 @@ def build_distribution(assignments, active_employees):
 
 
 @app.route('/schedules/generate', methods=['POST'])
-@login_required
+@hr_required
 def generate_schedule_route():
     data = request.get_json(silent=True) or {}
     try:
@@ -610,11 +688,17 @@ def get_schedule(year, month):
     schedule = fetch_schedule(year, month)
     if not schedule:
         return jsonify({'message': 'Für diesen Monat wurde noch kein Plan generiert'}), 404
+
+    if not is_hr(g.user):
+        # Who works when is the point of the plan; how the workload compares
+        # across colleagues is a management view, so it stays with HR.
+        schedule.pop('distribution', None)
+
     return jsonify(schedule)
 
 
 @app.route('/schedules/<int:year>/<int:month>', methods=['DELETE'])
-@login_required
+@hr_required
 def delete_schedule(year, month):
     connection = get_db_connection()
     cursor = connection.cursor()
@@ -682,7 +766,7 @@ def refresh_unfilled_count(cursor, schedule_id):
 
 
 @app.route('/assignments/<int:assignment_id>', methods=['PUT'])
-@login_required
+@hr_required
 def update_assignment(assignment_id):
     data = request.get_json(silent=True) or {}
     employee_id = data.get('employee_id')
@@ -715,7 +799,7 @@ def update_assignment(assignment_id):
 
 
 @app.route('/assignments/swap', methods=['POST'])
-@login_required
+@hr_required
 def swap_assignments():
     data = request.get_json(silent=True) or {}
     id_a = data.get('assignment_id_a')

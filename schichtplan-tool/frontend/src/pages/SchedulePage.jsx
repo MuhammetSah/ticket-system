@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, MONTH_NAMES } from '../api'
 import ScheduleGrid from '../components/ScheduleGrid'
+import CalendarView from '../components/CalendarView'
 import Distribution from '../components/Distribution'
 
 function currentMonthKey() {
@@ -8,7 +9,7 @@ function currentMonthKey() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 }
 
-function SchedulePage({ setFlash }) {
+function SchedulePage({ setFlash, user }) {
   const [ym, setYm] = useState(currentMonthKey())
   const [schedule, setSchedule] = useState(null)
   const [employees, setEmployees] = useState([])
@@ -16,8 +17,11 @@ function SchedulePage({ setFlash }) {
   const [loading, setLoading] = useState(true)
   const [warnings, setWarnings] = useState([])
   const [swapSelection, setSwapSelection] = useState(null)
+  const [view, setView] = useState('calendar')
 
   const [year, month] = ym.split('-').map(Number)
+  // Employee accounts read the plan; only HR may change it.
+  const canEdit = user?.role === 'hr'
 
   async function loadStaticData() {
     try {
@@ -142,15 +146,43 @@ function SchedulePage({ setFlash }) {
             <label htmlFor="month-picker">Monat</label>
             <input id="month-picker" type="month" value={ym} onChange={e => handleMonthChange(e.target.value)} />
           </div>
-          <button onClick={generate}>{schedule ? 'Neu generieren' : 'Plan generieren'}</button>
-          {schedule && <button type="button" className="btn-danger" onClick={deleteSchedule}>Plan löschen</button>}
+          {canEdit && (
+            <>
+              <button onClick={generate}>{schedule ? 'Neu generieren' : 'Plan generieren'}</button>
+              {schedule && <button type="button" className="btn-danger" onClick={deleteSchedule}>Plan löschen</button>}
+            </>
+          )}
         </div>
       </div>
+
+      {schedule && (
+        <div className="toolbar">
+          <div className="view-toggle">
+            <button
+              type="button"
+              className={view === 'calendar' ? 'active' : ''}
+              onClick={() => setView('calendar')}
+            >
+              Kalender
+            </button>
+            <button
+              type="button"
+              className={view === 'table' ? 'active' : ''}
+              onClick={() => setView('table')}
+            >
+              Tabelle
+            </button>
+          </div>
+        </div>
+      )}
 
       {loading && <p className="hint">Lade …</p>}
 
       {!loading && !schedule && (
-        <p className="empty-state">Für {MONTH_NAMES[month - 1]} {year} wurde noch kein Plan generiert.</p>
+        <p className="empty-state">
+          Für {MONTH_NAMES[month - 1]} {year} wurde noch kein Plan generiert.
+          {!canEdit && ' Sobald die Personalabteilung den Plan erstellt hat, erscheint er hier.'}
+        </p>
       )}
 
       {!loading && schedule && (
@@ -179,19 +211,32 @@ function SchedulePage({ setFlash }) {
             </div>
           )}
 
-          <p className="hint">
-            Mitarbeiter über die Auswahlfelder direkt umbesetzen, oder zwei Schichten mit ⇄ zum Tauschen auswählen
-            {swapSelection && ' (1 Schicht ausgewählt - jetzt eine zweite anklicken)'}.
-          </p>
+          {view === 'table' && canEdit && (
+            <p className="hint">
+              Mitarbeiter über die Auswahlfelder direkt umbesetzen, oder zwei Schichten mit ⇄ zum Tauschen auswählen
+              {swapSelection && ' (1 Schicht ausgewählt - jetzt eine zweite anklicken)'}.
+            </p>
+          )}
 
-          <ScheduleGrid
-            schedule={schedule}
-            employees={employees}
-            shiftTypes={shiftTypes}
-            onReassign={reassign}
-            swapSelection={swapSelection}
-            onToggleSwap={toggleSwapSelect}
-          />
+          {view === 'calendar' ? (
+            <div className="calendar-wrap">
+              <CalendarView
+                schedule={schedule}
+                shiftTypes={shiftTypes}
+                highlightEmployeeId={user?.employee_id ?? null}
+              />
+            </div>
+          ) : (
+            <ScheduleGrid
+              schedule={schedule}
+              employees={employees}
+              shiftTypes={shiftTypes}
+              readOnly={!canEdit}
+              onReassign={reassign}
+              swapSelection={swapSelection}
+              onToggleSwap={toggleSwapSelect}
+            />
+          )}
         </>
       )}
     </div>
