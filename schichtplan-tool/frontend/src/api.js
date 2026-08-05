@@ -1,13 +1,24 @@
 const API_URL = import.meta.env.VITE_API_URL
 
+/** Thrown when the API rejects a request because nobody is signed in. */
+export class UnauthorizedError extends Error {}
+
 async function request(path, options = {}) {
   const response = await fetch(`${API_URL}${path}`, {
     headers: { 'Content-Type': 'application/json' },
+    // Sends the session cookie; without it every guarded route answers 401.
+    credentials: 'include',
     ...options,
   })
   const data = await response.json().catch(() => null)
   if (!response.ok) {
-    throw new Error(data?.message || `Request failed (${response.status})`)
+    const message = data?.message || `Request failed (${response.status})`
+    if (response.status === 401) {
+      const error = new UnauthorizedError(message)
+      error.data = data
+      throw error
+    }
+    throw new Error(message)
   }
   return data
 }

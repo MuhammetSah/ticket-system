@@ -17,6 +17,17 @@ def init_db():
     connection = get_db_connection()
     cursor = connection.cursor()
 
+    # HR staff who may use the tool. Employees being scheduled are *not* users -
+    # they never log in, which is why the two live in separate tables.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            hash TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS employees(
             id INTEGER PRIMARY KEY AUTOINCREMENT,

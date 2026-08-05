@@ -1,15 +1,159 @@
+import os
 from datetime import date
+from functools import wraps
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, session
 from flask_cors import CORS
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from db import get_db_connection, init_db, WEEKDAYS
 from scheduler import generate_schedule
 
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:5173", "http://localhost:5174"])
+app.secret_key = os.environ.get('SECRET_KEY', 'schichtplan-local-dev')
+
+if os.environ.get('FLASK_ENV') == 'production':
+    app.config['SESSION_COOKIE_SAMESITE'] = 'None'
+    app.config['SESSION_COOKIE_SECURE'] = True
+
+# supports_credentials is required for the session cookie to survive the
+# cross-origin hop from the Vite dev server to this API.
+CORS(
+    app,
+    supports_credentials=True,
+    origins=[
+        origin.strip()
+        for origin in os.environ.get(
+            'ALLOWED_ORIGINS', 'http://localhost:5173,http://localhost:5174'
+        ).split(',')
+        if origin.strip()
+    ],
+)
 
 init_db()
+
+
+# ---------- authentication ----------
+
+def current_user_id():
+    return session.get('user_id')
+
+
+def login_required(view):
+    """Every route that touches staff data sits behind this.
+
+    Employees never log in - this guards the HR side of the tool, which is the
+    only side there is. Without it the whole roster, including names, emails and
+    booked time off, is readable by anyone who can reach the API.
+    """
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not current_user_id():
+            return jsonify({'message': 'Nicht angemeldet'}), 401
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
+def count_users(cursor):
+    cursor.execute('SELECT COUNT(*) AS n FROM users')
+    return cursor.fetchone()['n']
+
+
+@app.route('/register', methods=['POST'])
+def register():
+    data = request.get_json(silent=True) or {}
+    username = (data.get('username') or '').strip()
+    password = data.get('password') or ''
+
+    if not username or not password:
+        return jsonify({'message': 'Benutzername und Passwort sind erforderlich'}), 400
+    if len(password) < 8:
+        return jsonify({'message': 'Das Passwort muss mindestens 8 Zeichen lang sein'}), 400
+
+    connection = get_db_connection()
+    cursor = connection.cursor()
+
+    # The first account sets the tool up; after that, only someone already logged
+    # in may add colleagues. Otherwise anyone finding the URL could sign
+    # themselves up and read the entire roster.
+    if count_users(cursor) > 0 and not current_user_id():
+        connection.close()
+        return jsonify({'message': 'Neue Konten kann nur ein angemeldeter Benutzer anlegen'}), 403
+
+    cursor.execute('SELECT id FROM users WHERE username = ?', (username,))
+    if cursor.fetchone():
+        connection.close()
+        return jsonify({'message': 'Benutzername ist bereits vergeben'}), 400
+
+    cursor.execute(
+        'INSERT INTO users (username, hash) VALUES (?, ?)',
+        (username, generate_password_hash(password)),
+    )
+    user_id = cursor.lastrowid
+    connection.commit()
+    connection.close()
+
+    # Signing in the very first user saves them an immediate second step; an
+    # existing user adding a colleague must stay logged in as themselves.
+    if not current_user_id():
+        session['user_id'] = user_id
+
+    return jsonify({'id': user_id, 'username': username}), 201
+
+
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.get_json(silent=True) or {}
+    username = (data.get('username') or '').strip()
+    password = data.get('password') or ''
+
+    connection = get_db_connection()
+    cursor = connection.cursor()
+    cursor.execute('SELECT * FROM users WHERE username = ?', (username,))
+    user = cursor.fetchone()
+    connection.close()
+
+    # Same message either way, so the response cannot be used to find out which
+    # usernames exist.
+    if not user or not check_password_hash(user['hash'], password):
+        return jsonify({'message': 'Benutzername oder Passwort ist falsch'}), 401
+
+    session.clear()
+    session['user_id'] = user['id']
+    return jsonify({'id': user['id'], 'username': user['username']}), 200
+
+
+@app.route('/logout', methods=['POST'])
+def logout():
+    session.clear()
+    return jsonify({'message': 'Abgemeldet'}), 200
+
+
+@app.route('/me', methods=['GET'])
+def me():
+    user_id = current_user_id()
+    connection = get_db_connection()
+    cursor = connection.cursor()
+
+    # The frontend uses this on load both to restore a session and to find out
+    # whether this is a fresh install that still needs its first account.
+    setup_required = count_users(cursor) == 0
+
+    if not user_id:
+        connection.close()
+        return jsonify({'message': 'Nicht angemeldet', 'setup_required': setup_required}), 401
+
+    cursor.execute('SELECT id, username FROM users WHERE id = ?', (user_id,))
+    user = cursor.fetchone()
+    connection.close()
+
+    if not user:
+        # The account was deleted while the cookie was still around.
+        session.clear()
+        return jsonify({'message': 'Nicht angemeldet', 'setup_required': setup_required}), 401
+
+    return jsonify({'id': user['id'], 'username': user['username'], 'setup_required': False}), 200
 
 
 # ---------- serialization helpers ----------
@@ -101,6 +245,7 @@ def replace_shift_requirements(connection, shift_type_id, requirements):
 # ---------- employees ----------
 
 @app.route('/employees', methods=['GET'])
+@login_required
 def list_employees():
     connection = get_db_connection()
     cursor = connection.cursor()
@@ -111,6 +256,7 @@ def list_employees():
 
 
 @app.route('/employees', methods=['POST'])
+@login_required
 def create_employee():
     data = request.get_json(silent=True) or {}
     name = (data.get('name') or '').strip()
@@ -137,6 +283,7 @@ def create_employee():
 
 
 @app.route('/employees/<int:employee_id>', methods=['GET'])
+@login_required
 def get_employee(employee_id):
     connection = get_db_connection()
     cursor = connection.cursor()
@@ -151,6 +298,7 @@ def get_employee(employee_id):
 
 
 @app.route('/employees/<int:employee_id>', methods=['PUT'])
+@login_required
 def update_employee(employee_id):
     data = request.get_json(silent=True) or {}
     connection = get_db_connection()
@@ -182,6 +330,7 @@ def update_employee(employee_id):
 
 
 @app.route('/employees/<int:employee_id>', methods=['DELETE'])
+@login_required
 def delete_employee(employee_id):
     connection = get_db_connection()
     cursor = connection.cursor()
@@ -198,6 +347,7 @@ def delete_employee(employee_id):
 # ---------- shift types ----------
 
 @app.route('/shift-types', methods=['GET'])
+@login_required
 def list_shift_types():
     connection = get_db_connection()
     cursor = connection.cursor()
@@ -208,6 +358,7 @@ def list_shift_types():
 
 
 @app.route('/shift-types', methods=['POST'])
+@login_required
 def create_shift_type():
     data = request.get_json(silent=True) or {}
     name = (data.get('name') or '').strip()
@@ -236,6 +387,7 @@ def create_shift_type():
 
 
 @app.route('/shift-types/<int:shift_type_id>', methods=['PUT'])
+@login_required
 def update_shift_type(shift_type_id):
     data = request.get_json(silent=True) or {}
     connection = get_db_connection()
@@ -269,6 +421,7 @@ def update_shift_type(shift_type_id):
 
 
 @app.route('/shift-types/<int:shift_type_id>', methods=['DELETE'])
+@login_required
 def delete_shift_type(shift_type_id):
     connection = get_db_connection()
     cursor = connection.cursor()
@@ -397,6 +550,7 @@ def build_distribution(assignments, active_employees):
 
 
 @app.route('/schedules/generate', methods=['POST'])
+@login_required
 def generate_schedule_route():
     data = request.get_json(silent=True) or {}
     try:
@@ -451,6 +605,7 @@ def generate_schedule_route():
 
 
 @app.route('/schedules/<int:year>/<int:month>', methods=['GET'])
+@login_required
 def get_schedule(year, month):
     schedule = fetch_schedule(year, month)
     if not schedule:
@@ -459,6 +614,7 @@ def get_schedule(year, month):
 
 
 @app.route('/schedules/<int:year>/<int:month>', methods=['DELETE'])
+@login_required
 def delete_schedule(year, month):
     connection = get_db_connection()
     cursor = connection.cursor()
@@ -526,6 +682,7 @@ def refresh_unfilled_count(cursor, schedule_id):
 
 
 @app.route('/assignments/<int:assignment_id>', methods=['PUT'])
+@login_required
 def update_assignment(assignment_id):
     data = request.get_json(silent=True) or {}
     employee_id = data.get('employee_id')
@@ -558,6 +715,7 @@ def update_assignment(assignment_id):
 
 
 @app.route('/assignments/swap', methods=['POST'])
+@login_required
 def swap_assignments():
     data = request.get_json(silent=True) or {}
     id_a = data.get('assignment_id_a')

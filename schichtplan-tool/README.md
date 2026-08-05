@@ -6,11 +6,14 @@ This is a standalone project living alongside the Support Ticket System in this 
 
 ## Grundidee
 
-Industry-independent shift planning for HR: define employees with constraints (e.g. "never works Wednesdays", "only early shift"), define shift types with per-weekday staffing needs, then generate a month's schedule automatically. No employee accounts or login — this is an internal HR tool; employees are records, not users.
+Industry-independent shift planning for HR: define employees with constraints (e.g. "never works Wednesdays", "only early shift"), define shift types with per-weekday staffing needs, then generate a month's schedule automatically.
+
+Employees have no accounts and never log in — they are records, not users. HR staff *do* sign in, because the tool holds personal data (names, emails, booked time off) that should not be readable by anyone who finds the URL.
 
 ## Scope
 
-- **No employee login** – pure HR tool, single internal user
+- **No employee login** – pure HR tool; employees are scheduled, they do not use it
+- **HR sign-in** – the first visit sets up an account; after that everything is behind a login
 - **Monthly plans** – one schedule per calendar month
 - **Backtracking scheduling algorithm** – not greedy (see below)
 - **Manual post-editing by HR** – reassign any slot, or swap two shifts between employees
@@ -18,6 +21,7 @@ Industry-independent shift planning for HR: define employees with constraints (e
 
 ## Features
 
+- **HR authentication** – session-based login with hashed passwords (Werkzeug). Every route that touches staff data requires a session. Registration is open only until the first account exists — a fresh install sends you straight to setup; afterwards new colleagues can only be added by someone already signed in, so nobody can sign themselves up and read the roster
 - **Employee management** – name, optional email, optional monthly shift cap, recurring weekday unavailability (e.g. no Wednesdays), one-off unavailable dates (vacation/sick leave), and an optional allow-list restricting an employee to specific shift types (e.g. "only early shift")
 - **Shift type management** – name, start/end time, color, and required headcount per weekday (weekday and weekend staffing needs are often different)
 - **Automatic monthly schedule generation** via backtracking search
@@ -130,9 +134,11 @@ schichtplan-tool/
 │   └── requirements-dev.txt    # + ortools, only needed for the benchmark
 └── frontend/
     └── src/
-        ├── App.jsx           # Routing & navigation
+        ├── App.jsx           # Routing, navigation & auth guarding
         ├── api.js            # Fetch helper + shared constants
         ├── pages/
+        │   ├── Login.jsx          # HR sign-in
+        │   ├── Register.jsx       # First-account setup / add a colleague
         │   ├── Employees.jsx     # Employee CRUD + constraints
         │   ├── ShiftTypes.jsx    # Shift type CRUD + weekday requirements
         │   └── SchedulePage.jsx  # Generate / view / edit the monthly plan
@@ -153,6 +159,8 @@ python3 -m venv venv
 ```
 
 Runs by default on `http://localhost:5001` (chosen so it doesn't collide with the ticket-system backend on port 5000 if both run locally at once). Uses a local SQLite file (`schichtplan.db`, gitignored); the schema is created automatically on first run.
+
+On first launch the app has no accounts, so opening it lands on "Erstes Konto einrichten" to create one. In production also set `SECRET_KEY` (it signs the session cookie — the built-in fallback is for local use only) and `ALLOWED_ORIGINS` (comma-separated list of frontend origins allowed to call the API).
 
 Run the scheduler's unit tests with:
 
@@ -185,8 +193,14 @@ VITE_API_URL=http://localhost:5001
 
 ## API Endpoints
 
+Everything except `/`, `/register`, `/login` and `/me` requires a signed-in session and answers `401` without one.
+
 | Method | Route                          | Description                                              |
 |--------|----------------------------------|------------------------------------------------------------|
+| POST   | `/register`                     | Create the first account, or (when signed in) add a colleague |
+| POST   | `/login`                        | Sign in                                                      |
+| POST   | `/logout`                       | Sign out                                                      |
+| GET    | `/me`                           | Current user, or `401` with `setup_required` on a fresh install |
 | GET    | `/employees`                    | List employees (with their constraints)                    |
 | POST   | `/employees`                    | Create an employee                                          |
 | GET    | `/employees/<id>`               | Get one employee                                             |
