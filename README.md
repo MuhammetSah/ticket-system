@@ -61,7 +61,7 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Runs by default on `http://localhost:5000`.
+Runs by default on `http://localhost:5000`. With no `DATABASE_URL` environment variable set, it automatically uses a local SQLite database (`tickets.db`); set `DATABASE_URL` to point it at Postgres instead (used in production on Render). Optionally set a `SECRET_KEY` environment variable for signing session cookies — it falls back to a fixed development key otherwise, which is fine locally but should always be set in production.
 
 ### Frontend
 
