@@ -7,7 +7,6 @@ function TicketDetail({ setFlash }) {
     const [ticket, setTicket] = useState(null)
     const [currentuser, setCurrentuser] = useState(null)
     const [currentsolution, setCurrentsolution] = useState('')
-    const [currentUsername, setCurrentUsername] = useState(null)
     const [currentRole, setCurrentRole] = useState(null)
 
     useEffect(() => {
@@ -19,7 +18,6 @@ function TicketDetail({ setFlash }) {
             const user_response = await fetch(`${import.meta.env.VITE_API_URL}/me`, { credentials: 'include' })
             const user_data = await user_response.json()
             setCurrentuser(user_data.user_id)
-            setCurrentUsername(user_data.username)
             setCurrentRole(user_data.role)
         }
         loadTicket()

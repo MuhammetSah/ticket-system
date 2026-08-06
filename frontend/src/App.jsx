@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom'
 import Login from './Login'
 import Register from './Register'
@@ -10,8 +10,23 @@ import './App.css'
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const [authChecked, setAuthChecked] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
   const [flash, setFlash] = useState(null)
+
+  useEffect(() => {
+    async function checkSession() {
+      try {
+        const response = await fetch(`${import.meta.env.VITE_API_URL}/me`, { credentials: 'include' })
+        setIsLoggedIn(response.ok)
+      } catch {
+        setIsLoggedIn(false)
+      } finally {
+        setAuthChecked(true)
+      }
+    }
+    checkSession()
+  }, [])
 
   async function handleLogout() {
     await fetch(`${import.meta.env.VITE_API_URL}/logout`, {
@@ -45,7 +60,9 @@ function App() {
         <main className="page">
           <Routes>
             <Route path="/" element={
-              isLoggedIn ? (
+              !authChecked ? (
+                <p>Loading...</p>
+              ) : isLoggedIn ? (
                 <>
                   <CreateTicket
                     onTicketCreated={() => setRefreshKey(refreshKey + 1)}
