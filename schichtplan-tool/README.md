@@ -2,7 +2,7 @@
 
 An automated shift-scheduling tool for HR teams, built with React (frontend) and Flask (backend). HR defines employees, their availability constraints, and shift types with staffing requirements; the tool generates a full monthly schedule via backtracking search and lets HR fine-tune the result by hand — including swapping shifts between employees.
 
-This is a standalone project living alongside the Support Ticket System in this repository, and the fourth project in a portfolio (after the portfolio website, the ticket system, and a paused API-integration project).
+The fourth project in a portfolio, after the portfolio website, the [Support Ticket System](https://github.com/MuhammetSah/ticket-system), and a paused API-integration project.
 
 ## Grundidee
 
