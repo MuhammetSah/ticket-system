@@ -63,6 +63,10 @@ python app.py
 
 Runs by default on `http://localhost:5000`.
 
+The backend uses **SQLite locally** and **Postgres in production**, chosen automatically: if the `DATABASE_URL` environment variable is set it connects to Postgres, otherwise it creates a local `tickets.db` file. No setup is needed for local development.
+
+In production, also set `SECRET_KEY` to a private random value — it signs the session cookies, and the built-in fallback is only meant for local use.
+
 ### Frontend
 
 ```bash
