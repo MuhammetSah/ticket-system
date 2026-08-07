@@ -4,6 +4,10 @@ An automated shift-scheduling tool for HR teams, built with React (frontend) and
 
 The fourth project in a portfolio, after the portfolio website, the [Support Ticket System](https://github.com/MuhammetSah/ticket-system), and a paused API-integration project.
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/MuhammetSah/scheduling-tool)
+
+The Render button reads `render.yaml` and creates the API together with its Postgres database. The frontend goes on Vercel: import this repository, set the root directory to `frontend`, and point `VITE_API_URL` at the Render URL. Then set `ALLOWED_ORIGINS` and `APP_BASE_URL` on the Render service to the Vercel URL — see [Deployment](#deployment) for why that last step matters.
+
 ## Grundidee
 
 Industry-independent shift planning for HR: define employees with constraints (e.g. "never works Wednesdays", "only early shift"), define shift types with per-weekday staffing needs, then generate a month's schedule automatically.
